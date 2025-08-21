@@ -1,0 +1,43 @@
+# --- Go build artifacts ---
+/bin/
+/dist/
+/build/
+/out/
+/tmp/
+*.exe
+*.dll
+*.so
+*.dylib
+*.test
+coverage.out
+cover.out
+go.work
+go.work.sum
+
+# --- Logs ---
+*.log
+
+# --- Env & secrets (DO NOT COMMIT) ---
+.env
+.env.*
+!.env.example
+
+# TLS/PKI keys & certs (any folder)
+*.pem
+*.key
+*.crt
+*.pfx
+*.p12
+*.der
+*.csr
+
+# Explicit OpenSSL config (root or anywhere)
+openssl.cnf
+**/openssl.cnf
+
+# --- OS / editor noise ---
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.code-workspace

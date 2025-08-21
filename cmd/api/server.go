@@ -1,10 +1,12 @@
 package main
 
 import (
+	"crypto/tls"
 	"fmt"
 	"log"
 	"net/http"
-	"strings"
+
+	"github.com/5w1tchy/books-api/internal/api/middlewares"
 )
 
 type User struct {
@@ -26,7 +28,6 @@ type Book struct {
 }
 
 func rootHandler(w http.ResponseWriter, r *http.Request) {
-	// fmt.Fprintf(w, "Hello Root Route")
 	w.Write([]byte("Hello Root Route"))
 	fmt.Println("Hello Root Route")
 }
@@ -60,22 +61,9 @@ func booksHandler(w http.ResponseWriter, r *http.Request) {
 func usersHandler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		path := strings.TrimPrefix(r.URL.Path, "/users/")
-		userID := strings.TrimSpace(path)
-		fmt.Println("User ID:", userID)
-
-		queryParams := r.URL.Query()
-		sortby := queryParams.Get("sortby")
-		key := queryParams.Get("key")
-		sortorder := queryParams.Get("sortorder")
-
-		if sortorder == "" {
-			sortorder = "asc"
-		}
-
-		fmt.Printf("Sort By: %s, Key: %s, Sort Order: %s\n", sortby, key, sortorder)
-
+		// Handle GET request
 		w.Write([]byte("Hello GET Method on Users route"))
+		fmt.Println("Hello GET Method on Users route")
 	case http.MethodPost:
 		// Handle POST request
 		w.Write([]byte("Hello POST Method on Users route"))
@@ -123,16 +111,32 @@ func main() {
 
 	port := ":3000"
 
-	http.HandleFunc("/", rootHandler)
+	cert := "cert.pem"
+	key := "key.pem"
 
-	http.HandleFunc("/books/", booksHandler)
+	mux := http.NewServeMux()
 
-	http.HandleFunc("/users/", usersHandler)
+	mux.HandleFunc("/", rootHandler)
 
-	http.HandleFunc("/categories/", categoryHandler)
+	mux.HandleFunc("/books/", booksHandler)
+
+	mux.HandleFunc("/users/", usersHandler)
+
+	mux.HandleFunc("/categories/", categoryHandler)
+
+	tlsConfig := &tls.Config{
+		MinVersion: tls.VersionTLS12, // Change later to TLS 1.3
+	}
+
+	// Create custom server
+	server := &http.Server{
+		Addr:      port,
+		Handler:   middlewares.SecurityHeaders(mux),
+		TLSConfig: tlsConfig,
+	}
 
 	fmt.Println("Server is running on port:", port)
-	err := http.ListenAndServe(port, nil)
+	err := server.ListenAndServeTLS(cert, key)
 	if err != nil {
 		log.Fatalln("Error starting server:", err)
 	}
