@@ -118,11 +118,11 @@ func main() {
 
 	mux.HandleFunc("/", rootHandler)
 
-	mux.HandleFunc("/books/", booksHandler)
+	mux.HandleFunc("/books", booksHandler)
 
-	mux.HandleFunc("/users/", usersHandler)
+	mux.HandleFunc("/users", usersHandler)
 
-	mux.HandleFunc("/categories/", categoryHandler)
+	mux.HandleFunc("/categories", categoryHandler)
 
 	tlsConfig := &tls.Config{
 		MinVersion: tls.VersionTLS12, // Change later to TLS 1.3
@@ -131,7 +131,7 @@ func main() {
 	// Create custom server
 	server := &http.Server{
 		Addr:    port,
-		Handler: mw.SecurityHeaders(mw.Cors(mux)),
+		Handler: mw.Compression(mw.ResponseTimeMiddleware(mw.SecurityHeaders(mw.Cors(mux)))),
 		// Handler:   mw.CORS(mux),
 		TLSConfig: tlsConfig,
 	}
