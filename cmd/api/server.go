@@ -6,7 +6,7 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/5w1tchy/books-api/internal/api/middlewares"
+	mw "github.com/5w1tchy/books-api/internal/api/middlewares"
 )
 
 type User struct {
@@ -130,8 +130,9 @@ func main() {
 
 	// Create custom server
 	server := &http.Server{
-		Addr:      port,
-		Handler:   middlewares.SecurityHeaders(mux),
+		Addr:    port,
+		Handler: mw.SecurityHeaders(mw.Cors(mux)),
+		// Handler:   mw.CORS(mux),
 		TLSConfig: tlsConfig,
 	}
 
