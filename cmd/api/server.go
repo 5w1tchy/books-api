@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"time"
 
 	mw "github.com/5w1tchy/books-api/internal/api/middlewares"
+	"github.com/redis/go-redis/v9"
 )
 
 type User struct {
@@ -114,6 +116,12 @@ func main() {
 	cert := "cert.pem"
 	key := "key.pem"
 
+	rdb := redis.NewClient(&redis.Options{
+		Addr:     "127.0.0.1:6379",
+		Password: "", // no password set
+		DB:       0,  // use default DB
+	})
+
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/", rootHandler)
@@ -128,10 +136,26 @@ func main() {
 		MinVersion: tls.VersionTLS12, // Change later to TLS 1.3
 	}
 
+	tb := mw.NewRedisTokenBucket(rdb, 5, 20, mw.PerIPKey("tb"))
+
+	sw := mw.NewRedisSlidingWindow(rdb, 3000, 60*time.Minute, mw.PerIPKey("sw"))
+
+	handler := sw.Middleware(
+		tb.Middleware(
+			mw.Compression(
+				mw.ResponseTimeMiddleware(
+					mw.SecurityHeaders(
+						mw.Cors(mux),
+					),
+				),
+			),
+		),
+	)
+
 	// Create custom server
 	server := &http.Server{
 		Addr:    port,
-		Handler: mw.Compression(mw.ResponseTimeMiddleware(mw.SecurityHeaders(mw.Cors(mux)))),
+		Handler: handler,
 		// Handler:   mw.CORS(mux),
 		TLSConfig: tlsConfig,
 	}
