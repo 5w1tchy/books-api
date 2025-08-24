@@ -31,53 +31,34 @@ type Book struct {
 
 func rootHandler(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("Hello Root Route"))
-	fmt.Println("Hello Root Route")
 }
 
 func booksHandler(w http.ResponseWriter, r *http.Request) {
 	// fmt.Fprintf(w, "Hello Books Route")
 	switch r.Method {
 	case http.MethodGet:
-		// Handle GET request
 		w.Write([]byte("Hello GET Method on Books route"))
-		fmt.Println("Hello GET Method on Books route")
 	case http.MethodPost:
-		// Handle POST request
 		w.Write([]byte("Hello POST Method on Books route"))
-		fmt.Println("Hello POST Method on Books route")
 	case http.MethodPatch:
-		// Handle PATCH request
 		w.Write([]byte("Hello PATCH Method on Books route"))
-		fmt.Println("Hello PATCH Method on Books route")
 	case http.MethodPut:
-		// Handle PUT request
 		w.Write([]byte("Hello PUT Method on Books route"))
-		fmt.Println("Hello PUT Method on Books route")
 	case http.MethodDelete:
-		// Handle DELETE request
 		w.Write([]byte("Hello DELETE Method on Books route"))
-		fmt.Println("Hello DELETE Method on Books route")
 	}
 }
 
 func usersHandler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		// Handle GET request
 		w.Write([]byte("Hello GET Method on Users route"))
-		fmt.Println("Hello GET Method on Users route")
 	case http.MethodPost:
-		// Handle POST request
 		w.Write([]byte("Hello POST Method on Users route"))
-		fmt.Println("Hello POST Method on Users route")
 	case http.MethodPatch:
-		// Handle PATCH request
 		w.Write([]byte("Hello PATCH Method on Users route"))
-		fmt.Println("Hello PATCH Method on Users route")
 	case http.MethodPut:
-		// Handle PUT request
 		w.Write([]byte("Hello PUT Method on Users route"))
-		fmt.Println("Hello PUT Method on Users route")
 	case http.MethodDelete:
 		// Handle DELETE request
 		w.Write([]byte("Hello DELETE Method on Users route"))
@@ -87,25 +68,15 @@ func usersHandler(w http.ResponseWriter, r *http.Request) {
 func categoryHandler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		// Handle GET request
 		w.Write([]byte("Hello GET Method on Categories route"))
-		fmt.Println("Hello GET Method on Categories route")
 	case http.MethodPost:
-		// Handle POST request
 		w.Write([]byte("Hello POST Method on Categories route"))
-		fmt.Println("Hello POST Method on Categories route")
 	case http.MethodPatch:
-		// Handle PATCH request
 		w.Write([]byte("Hello PATCH Method on Categories route"))
-		fmt.Println("Hello PATCH Method on Categories route")
 	case http.MethodPut:
-		// Handle PUT request
 		w.Write([]byte("Hello PUT Method on Categories route"))
-		fmt.Println("Hello PUT Method on Categories route")
 	case http.MethodDelete:
-		// Handle DELETE request
 		w.Write([]byte("Hello DELETE Method on Categories route"))
-		fmt.Println("Hello DELETE Method on Categories route")
 	}
 }
 
@@ -126,11 +97,11 @@ func main() {
 
 	mux.HandleFunc("/", rootHandler)
 
-	mux.HandleFunc("/books", booksHandler)
+	mux.HandleFunc("/books/", booksHandler)
 
-	mux.HandleFunc("/users", usersHandler)
+	mux.HandleFunc("/users/", usersHandler)
 
-	mux.HandleFunc("/categories", categoryHandler)
+	mux.HandleFunc("/categories/", categoryHandler)
 
 	tlsConfig := &tls.Config{
 		MinVersion: tls.VersionTLS12, // Change later to TLS 1.3
@@ -140,18 +111,47 @@ func main() {
 
 	sw := mw.NewRedisSlidingWindow(rdb, 3000, 60*time.Minute, mw.PerIPKey("sw"))
 
+	hppOptions := mw.HPPOptions{
+		CheckQuery:                  true,
+		CheckBody:                   true,
+		CheckBodyOnlyForContentType: "application/x-www-form-urlencoded",
+		Whitelist: []string{
+			// General / shared
+			"id", "user_id", "book_id", "chapter", "page", "limit", "offset",
+			"lang", "search", "category", "tags",
+
+			// Books
+			"title", "author", "sort", "order",
+
+			// Users
+			"username", "email", "password", "token", "session_id",
+
+			// Notes
+			"note_id", "content", "created_at", "updated_at",
+
+			// Highlights
+			"highlight_id", "text", "color", "created_at",
+
+			// Progress
+			"progress_id", "percentage", "last_read_at",
+		},
+	}
+
 	handler := sw.Middleware(
 		tb.Middleware(
-			mw.Compression(
-				mw.ResponseTimeMiddleware(
-					mw.SecurityHeaders(
-						mw.Cors(mux),
+			mw.ResponseTimeMiddleware(
+				mw.Cors(
+					mw.HPP(hppOptions)(
+						mw.SecurityHeaders(
+							mw.Compression(
+								mux,
+							),
+						),
 					),
 				),
 			),
 		),
 	)
-
 	// Create custom server
 	server := &http.Server{
 		Addr:    port,
