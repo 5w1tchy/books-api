@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: books-api
+    runtime: go
+    envVars:
+      - key: UPSTASH_REDIS_URL
+        sync: false
+      - key: TB_RATE
+        value: "5"
+      - key: TB_BURST
+        value: "20"
+      - key: SW_LIMIT
+        value: "3000"
+      - key: SW_WINDOW
+        value: "3600s"
+    buildCommand: go build -o books-api ./cmd/api
+    startCommand: ./books-api
+    env: go1.25
