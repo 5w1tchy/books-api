@@ -18,5 +18,7 @@ func Router() http.Handler {
 
 	mux.HandleFunc("/categories/", handlers.CategoriesHandler)
 
+	mux.HandleFunc("GET /healthz", handlers.Healthz)
+
 	return mux
 }

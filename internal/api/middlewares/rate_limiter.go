@@ -112,6 +112,12 @@ return {allowed, tokens, retry_after_ms}
 
 func (tb *RedisTokenBucket) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+
+		if r.Method == http.MethodOptions {
+			next.ServeHTTP(w, r)
+			return
+		}
+
 		key := tb.keyFn(r)
 		ctx := r.Context()
 
@@ -169,6 +175,12 @@ func NewRedisSlidingWindow(rdb *redis.Client, limit int, window time.Duration, k
 
 func (sw *RedisSlidingWindow) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+
+		if r.Method == http.MethodOptions {
+			next.ServeHTTP(w, r)
+			return
+		}
+
 		ctx := context.Background()
 		now := time.Now().UnixMilli()
 		key := sw.keyFn(r)
