@@ -17,19 +17,14 @@ import (
 )
 
 func main() {
-
+	// Load env when running from cmd/api (local dev)
 	_ = godotenv.Load("../../.env")
 
-	port := ":3000"
-
-	cert := "cert.pem"
-	key := "key.pem"
-
+	// -------- Redis (Upstash) ----------
 	var rdb *redis.Client
 
 	if url := os.Getenv("UPSTASH_REDIS_URL"); url != "" {
-		// Path A: full Upstash URL (recommended)
-		opt, err := redis.ParseURL(url) // e.g. rediss://default:<token>@host:port
+		opt, err := redis.ParseURL(url) // rediss://default:<token>@host:6379
 		if err != nil {
 			log.Fatalf("invalid UPSTASH_REDIS_URL: %v", err)
 		}
@@ -41,9 +36,8 @@ func main() {
 		opt.WriteTimeout = 1 * time.Second
 		rdb = redis.NewClient(opt)
 	} else {
-		// Path B: split fields
-		addr := os.Getenv("REDIS_ADDR")     // host:port (no scheme)
-		user := os.Getenv("REDIS_USER")     // "default" for Upstash
+		addr := os.Getenv("REDIS_ADDR")     // host:port
+		user := os.Getenv("REDIS_USER")     // "default"
 		pass := os.Getenv("REDIS_PASSWORD") // token
 		if addr == "" || user == "" || pass == "" {
 			log.Fatal("missing Redis config: set UPSTASH_REDIS_URL or REDIS_ADDR/REDIS_USER/REDIS_PASSWORD")
@@ -53,25 +47,20 @@ func main() {
 			Username:     user,
 			Password:     pass,
 			DB:           0,
-			DialTimeout:  2 * time.Second,
-			ReadTimeout:  500 * time.Millisecond,
-			WriteTimeout: 500 * time.Millisecond,
+			DialTimeout:  5 * time.Second,
+			ReadTimeout:  1 * time.Second,
+			WriteTimeout: 1 * time.Second,
 			TLSConfig:    &tls.Config{MinVersion: tls.VersionTLS12},
 		})
 	}
 
-	// Fail fast if Redis isn’t reachable
+	// Fail fast if Redis isn't reachable
 	if err := rdb.Ping(context.Background()).Err(); err != nil {
 		log.Fatalf("Redis connection failed: %v", err)
 	}
-	fmt.Println("✅ Connected to Redis")
 
-	tlsConfig := &tls.Config{
-		MinVersion: tls.VersionTLS12, // Change later to TLS 1.3
-	}
-
+	// -------- Rate limiting / middlewares ----------
 	tb := mw.NewRedisTokenBucket(rdb, 5, 20, mw.PerIPKey("tb"))
-
 	sw := mw.NewRedisSlidingWindow(rdb, 3000, 60*time.Minute, mw.PerIPKey("sw"))
 
 	hppOptions := mw.HPPOptions{
@@ -82,19 +71,14 @@ func main() {
 			// General / shared
 			"id", "user_id", "book_id", "chapter", "page", "limit", "offset",
 			"lang", "search", "category", "tags",
-
 			// Books
 			"title", "author", "sort", "order",
-
 			// Users
 			"username", "email", "password", "token", "session_id",
-
 			// Notes
 			"note_id", "content", "created_at", "updated_at",
-
 			// Highlights
 			"highlight_id", "text", "color", "created_at",
-
 			// Progress
 			"progress_id", "percentage", "last_read_at",
 		},
@@ -110,17 +94,29 @@ func main() {
 		mw.Compression,
 		mw.SecurityHeaders,
 	)
-	// Create custom server
-	server := &http.Server{
-		Addr:    port,
-		Handler: secureMux,
-		// Handler:   mw.CORS(mux),
-		TLSConfig: tlsConfig,
+
+	// -------- Serve: HTTP on Render, HTTPS locally ----------
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "3000"
 	}
 
-	fmt.Println("Server is running on port:", port)
-	err := server.ListenAndServeTLS(cert, key)
-	if err != nil {
-		log.Fatalln("Error starting server:", err)
+	server := &http.Server{
+		Addr:    ":" + port,
+		Handler: secureMux,
 	}
+
+	// If PORT is set (Render), run plain HTTP (Render terminates TLS at the edge)
+	if os.Getenv("PORT") != "" {
+		fmt.Println("Server (Render) listening on port:", port, "(HTTP)")
+		log.Fatal(server.ListenAndServe())
+	}
+
+	// Local dev: use mkcert certs for HTTPS
+	cert := "cert.pem"
+	key := "key.pem"
+	server.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12}
+
+	fmt.Println("Server (local) listening on port:", port, "(HTTPS)")
+	log.Fatal(server.ListenAndServeTLS(cert, key))
 }
