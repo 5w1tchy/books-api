@@ -8,13 +8,13 @@ import (
 var allowedOrigins = []string{
 	"http://localhost:5173",
 	"http://127.0.0.1:5173",
+	// add your future frontend origin here (e.g., "https://books-ui.onrender.com")
 }
 
 func Cors(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
 		if origin != "" && !isOriginAllowed(origin) {
-			// 🚨 Log rejected origins
 			log.Printf("[CORS] Blocked request from origin: %s on %s %s\n",
 				origin, r.Method, r.URL.Path)
 			http.Error(w, "Origin not allowed", http.StatusForbidden)
@@ -25,14 +25,17 @@ func Cors(next http.Handler) http.Handler {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Vary", "Origin")
 		}
+
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-		w.Header().Set("Access-Control-Expose-Headers", "Authorization")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, PUT, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Credentials", "true")
 		w.Header().Set("Access-Control-Max-Age", "3600")
 
+		// Expose useful headers to the browser
+		w.Header().Set("Access-Control-Expose-Headers",
+			"Authorization, X-RateLimit-Policy, X-RateLimit-Limit, X-RateLimit-Remaining, Retry-After, X-Response-Time")
+
 		if r.Method == http.MethodOptions {
-			w.Header().Set("Access-Control-Max-Age", "600")
 			w.Header().Add("Vary", "Access-Control-Request-Method")
 			w.Header().Add("Vary", "Access-Control-Request-Headers")
 			w.WriteHeader(http.StatusNoContent)
