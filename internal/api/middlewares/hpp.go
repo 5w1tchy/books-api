@@ -70,3 +70,20 @@ func filterQueryParams(r *http.Request, whitelist []string) {
 	}
 	r.URL.RawQuery = query.Encode()
 }
+
+func DefaultHPPOptions() HPPOptions {
+	return HPPOptions{
+		CheckQuery:                  true,
+		CheckBody:                   true,
+		CheckBodyOnlyForContentType: "application/x-www-form-urlencoded",
+		Whitelist: []string{
+			"id", "user_id", "book_id", "chapter", "page", "limit", "offset",
+			"lang", "search", "category", "tags",
+			"title", "author", "sort", "order",
+			"username", "email", "password", "token", "session_id",
+			"note_id", "content", "created_at", "updated_at",
+			"highlight_id", "text", "color", "created_at",
+			"progress_id", "percentage", "last_read_at",
+		},
+	}
+}

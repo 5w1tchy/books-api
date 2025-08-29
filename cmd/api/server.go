@@ -11,6 +11,7 @@ import (
 
 	mw "github.com/5w1tchy/books-api/internal/api/middlewares"
 	"github.com/5w1tchy/books-api/internal/api/router"
+	"github.com/5w1tchy/books-api/internal/repository/sqlconnect"
 	"github.com/5w1tchy/books-api/pkg/utils"
 	"github.com/joho/godotenv"
 	"github.com/redis/go-redis/v9"
@@ -19,6 +20,12 @@ import (
 func main() {
 	// Load env when running from cmd/api (local dev)
 	_ = godotenv.Load("../../.env")
+
+	db, err := sqlconnect.ConnectDB()
+	if err != nil {
+		log.Fatalf("failed to connect to database: %v", err)
+	}
+	defer db.Close()
 
 	// -------- Redis (Upstash) ----------
 	var rdb *redis.Client
@@ -63,29 +70,10 @@ func main() {
 	tb := mw.NewRedisTokenBucket(rdb, 5, 20, mw.PerIPKey("tb"))
 	sw := mw.NewRedisSlidingWindow(rdb, 3000, 60*time.Minute, mw.PerIPKey("sw"))
 
-	hppOptions := mw.HPPOptions{
-		CheckQuery:                  true,
-		CheckBody:                   true,
-		CheckBodyOnlyForContentType: "application/x-www-form-urlencoded",
-		Whitelist: []string{
-			// General / shared
-			"id", "user_id", "book_id", "chapter", "page", "limit", "offset",
-			"lang", "search", "category", "tags",
-			// Books
-			"title", "author", "sort", "order",
-			// Users
-			"username", "email", "password", "token", "session_id",
-			// Notes
-			"note_id", "content", "created_at", "updated_at",
-			// Highlights
-			"highlight_id", "text", "color", "created_at",
-			// Progress
-			"progress_id", "percentage", "last_read_at",
-		},
-	}
+	hppOptions := mw.DefaultHPPOptions()
 
 	secureMux := utils.ApplyMiddleware(
-		router.Router(),
+		router.Router(db),
 		mw.Cors,
 		mw.ResponseTimeMiddleware,
 		mw.HPP(hppOptions),
