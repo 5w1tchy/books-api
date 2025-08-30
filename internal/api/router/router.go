@@ -13,11 +13,26 @@ func Router(db *sql.DB) http.Handler {
 	mux.HandleFunc("/", handlers.RootHandler)
 	mux.HandleFunc("/users/", handlers.UsersHandler)
 
-	// pass db to handlers that need it
+	// Books: redirect /books -> /books/
+	mux.HandleFunc("/books", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/books/", http.StatusMovedPermanently)
+	})
 	mux.HandleFunc("/books/", handlers.BooksHandler(db))
+
+	// Categories: redirect /categories -> /categories/
+	mux.HandleFunc("/categories", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/categories/", http.StatusMovedPermanently)
+	})
 	mux.HandleFunc("/categories/", handlers.CategoriesHandler(db))
+
+	// Authors: redirect /authors -> /authors/
+	mux.HandleFunc("/authors", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/authors/", http.StatusMovedPermanently)
+	})
 	mux.HandleFunc("/authors/", handlers.AuthorsHandler(db))
 
+	// Health
 	mux.HandleFunc("GET /healthz", handlers.Healthz)
+
 	return mux
 }
