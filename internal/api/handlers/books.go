@@ -22,6 +22,11 @@ type PublicBook struct {
 	Title         string   `json:"title"`
 	Author        string   `json:"author"`
 	CategorySlugs []string `json:"category_slugs"`
+
+	// Included only for single-book responses
+	Summary string `json:"summary,omitempty"`
+	Short   string `json:"short,omitempty"`
+	Coda    string `json:"coda,omitempty"`
 }
 
 type CreateBookDTO struct {
@@ -55,13 +60,13 @@ func getBooks(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 	idPart := strings.Trim(strings.TrimPrefix(r.URL.Path, "/books/"), "/")
 	w.Header().Set("Content-Type", "application/json")
 
-	// LIST
+	// LIST: keep light (no big text fields)
 	if idPart == "" {
 		rows, err := db.Query(`
 			SELECT b.id, b.short_id, b.title, a.name AS author,
 			       COALESCE(json_agg(c.slug) FILTER (WHERE c.slug IS NOT NULL), '[]') AS category_slugs
 			FROM books b
-			JOIN authors a             ON a.id = b.author_id
+			JOIN authors a               ON a.id = b.author_id
 			LEFT JOIN book_categories bc ON bc.book_id = b.id
 			LEFT JOIN categories c        ON c.id = bc.category_id
 			GROUP BY b.id, b.short_id, b.title, a.name
@@ -87,7 +92,7 @@ func getBooks(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// SINGLE: by UUID, short_id, or slug
+	// SINGLE: by UUID, short_id, or slug — include book_outputs
 	cond := "b.id = $1"
 	var arg any = idPart
 	if isDigits(idPart) {
@@ -106,15 +111,22 @@ func getBooks(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 	var pb PublicBook
 	var slugsJSON []byte
 	err := db.QueryRow(`
-		SELECT b.id, b.short_id, b.title, a.name AS author,
-		       COALESCE(json_agg(c.slug) FILTER (WHERE c.slug IS NOT NULL), '[]') AS category_slugs
+		SELECT
+			b.id,
+			b.short_id,
+			b.title,
+			a.name AS author,
+			COALESCE(json_agg(c.slug) FILTER (WHERE c.slug IS NOT NULL), '[]') AS category_slugs,
+			COALESCE(bo.summary, ''), COALESCE(bo.short, ''), COALESCE(bo.coda, '')
 		FROM books b
-		JOIN authors a             ON a.id = b.author_id
+		JOIN authors a               ON a.id = b.author_id
 		LEFT JOIN book_categories bc ON bc.book_id = b.id
 		LEFT JOIN categories c        ON c.id = bc.category_id
+		LEFT JOIN book_outputs bo     ON bo.book_id = b.id
 		WHERE `+cond+`
-		GROUP BY b.id, b.short_id, b.title, a.name`, arg).
-		Scan(&pb.ID, &pb.ShortID, &pb.Title, &pb.Author, &slugsJSON)
+		GROUP BY b.id, b.short_id, b.title, a.name, bo.summary, bo.short, bo.coda`,
+		arg,
+	).Scan(&pb.ID, &pb.ShortID, &pb.Title, &pb.Author, &slugsJSON, &pb.Summary, &pb.Short, &pb.Coda)
 
 	if errors.Is(err, sql.ErrNoRows) {
 		http.Error(w, "Book not found", http.StatusNotFound)
@@ -167,7 +179,7 @@ func postBook(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 3) Insert book (keep legacy author text for now, plus author_id+slug)
+	// 3) Insert book
 	var id string
 	var shortID int64
 	if err := tx.QueryRow(`
@@ -213,37 +225,27 @@ func postBook(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 
 // --- helpers (place below) ---
 
-// very small slugifier (ASCII lower, non [a-z0-9] -> "-", collapse)
-
+// tiny slugifier
 func slugify(s string) string {
-	// Lowercase & trim
 	s = strings.ToLower(strings.TrimSpace(s))
-
-	// Normalize to NFD form and strip nonspacing marks (accents/diacritics)
 	t := transform.Chain(
 		norm.NFD,
-		runes.Remove(runes.In(unicode.Mn)), // removes diacritics
+		runes.Remove(runes.In(unicode.Mn)),
 		norm.NFC,
 	)
 	normalized, _, _ := transform.String(t, s)
 	s = normalized
-
-	// Replace non-alphanumeric with -
 	reNon := regexp.MustCompile(`[^a-z0-9]+`)
 	s = reNon.ReplaceAllString(s, "-")
-
-	// Collapse dashes and trim
 	reDash := regexp.MustCompile(`-+`)
 	s = reDash.ReplaceAllString(s, "-")
 	s = strings.Trim(s, "-")
-
 	if s == "" {
 		s = "item"
 	}
 	return s
 }
 
-// ensure slug uniqueness by appending -2, -3, ... up to maxTries
 func ensureUniqueSlug(tx *sql.Tx, table, col, base string, maxTries int) (string, error) {
 	slug := base
 	for i := 1; i <= maxTries; i++ {
@@ -255,14 +257,12 @@ func ensureUniqueSlug(tx *sql.Tx, table, col, base string, maxTries int) (string
 		if !exists {
 			return slug, nil
 		}
-		slug = base + "-" + strconv.Itoa(i+1) // base, base-2, base-3...
+		slug = base + "-" + strconv.Itoa(i+1)
 	}
 	return "", fmt.Errorf("could not create unique slug for %q", base)
 }
 
-// finds author by name; creates if missing (with unique slug)
 func getOrCreateAuthor(tx *sql.Tx, name string) (id string, slug string, err error) {
-	// try existing
 	err = tx.QueryRow(`SELECT id, slug FROM authors WHERE name = $1`, name).Scan(&id, &slug)
 	if err == nil {
 		return id, slug, nil
@@ -271,7 +271,6 @@ func getOrCreateAuthor(tx *sql.Tx, name string) (id string, slug string, err err
 		return "", "", err
 	}
 
-	// create with unique slug
 	base := slugify(name)
 	slug, err = ensureUniqueSlug(tx, "authors", "slug", base, 10)
 	if err != nil {
@@ -312,7 +311,6 @@ func patchBook(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 		cond, arg = "short_id = $1", n
 	}
 
-	// Update title/author if provided
 	set := []string{}
 	args := []any{}
 	if dto.Title != nil {
@@ -342,7 +340,6 @@ func patchBook(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Replace categories if provided
 	if dto.CategorySlugs != nil {
 		slugs := dedupSlugs(*dto.CategorySlugs)
 		if len(slugs) == 0 {
@@ -384,7 +381,6 @@ func patchBook(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// return updated book
 	getBooks(db, w, r)
 }
 
