@@ -16,6 +16,7 @@ func Router(db *sql.DB) http.Handler {
 	// pass db to handlers that need it
 	mux.HandleFunc("/books/", handlers.BooksHandler(db))
 	mux.HandleFunc("/categories/", handlers.CategoriesHandler(db))
+	mux.HandleFunc("/authors/", handlers.AuthorsHandler(db))
 
 	mux.HandleFunc("GET /healthz", handlers.Healthz)
 	return mux
