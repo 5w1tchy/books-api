@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/5w1tchy/books-api/internal/api/handlers"
+	"github.com/5w1tchy/books-api/internal/api/handlers/books"
 )
 
 func Router(db *sql.DB) http.Handler {
@@ -17,7 +18,7 @@ func Router(db *sql.DB) http.Handler {
 	mux.HandleFunc("/books", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/books/", http.StatusMovedPermanently)
 	})
-	mux.HandleFunc("/books/", handlers.BooksHandler(db))
+	mux.HandleFunc("/books/", books.Handler(db))
 
 	// Categories: redirect /categories -> /categories/
 	mux.HandleFunc("/categories", func(w http.ResponseWriter, r *http.Request) {
