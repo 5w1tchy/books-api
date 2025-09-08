@@ -73,7 +73,7 @@ func main() {
 	hppOptions := mw.DefaultHPPOptions()
 
 	secureMux := utils.ApplyMiddleware(
-		router.Router(db),
+		router.Router(db, rdb),
 		mw.Cors,
 		mw.ResponseTimeMiddleware,
 		mw.HPP(hppOptions),

@@ -16,11 +16,9 @@ func HPP(opts HPPOptions) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if opts.CheckBody && r.Method == http.MethodPost && isCorrectContentType(r, opts.CheckBodyOnlyForContentType) {
-				// Filter the body params
 				filterBodyParams(r, opts.Whitelist)
 			}
 			if opts.CheckQuery && r.URL.Query() != nil {
-				// Filter the query params
 				filterQueryParams(r, opts.Whitelist)
 			}
 			next.ServeHTTP(w, r)
@@ -33,14 +31,12 @@ func isCorrectContentType(r *http.Request, contentType string) bool {
 }
 
 func filterBodyParams(r *http.Request, whitelist []string) {
-	err := r.ParseForm()
-	if err != nil {
+	if err := r.ParseForm(); err != nil {
 		return
 	}
 	for k, v := range r.Form {
 		if len(v) > 1 {
-			r.Form.Set(k, v[0]) // first value
-			// r.Form.Set(k, v[len(v)-1]) last value
+			r.Form.Set(k, v[0])
 		}
 		if !isWhitelisted(k, whitelist) {
 			delete(r.Form, k)
@@ -61,8 +57,7 @@ func filterQueryParams(r *http.Request, whitelist []string) {
 	query := r.URL.Query()
 	for k, v := range query {
 		if len(v) > 1 {
-			query.Set(k, v[0]) // first value
-			// query.Set(k, v[len(v)-1]) last value
+			query.Set(k, v[0])
 		}
 		if !isWhitelisted(k, whitelist) {
 			query.Del(k)
@@ -77,12 +72,15 @@ func DefaultHPPOptions() HPPOptions {
 		CheckBody:                   true,
 		CheckBodyOnlyForContentType: "application/x-www-form-urlencoded",
 		Whitelist: []string{
-			"id", "user_id", "book_id", "chapter", "page", "limit", "offset",
-			"lang", "search", "category", "tags",
-			"title", "author", "sort", "order",
+			"id", "user_id", "book_id", "chapter", "page",
+			"limit", "offset",
+			"lang", "search", "q",
+			"category", "categories", "tags",
+			"title", "author", "min_sim",
+			"sort", "order", "match",
 			"username", "email", "password", "token", "session_id",
 			"note_id", "content", "created_at", "updated_at",
-			"highlight_id", "text", "color", "created_at",
+			"highlight_id", "text", "color",
 			"progress_id", "percentage", "last_read_at",
 		},
 	}
