@@ -74,6 +74,7 @@ func main() {
 
 	secureMux := utils.ApplyMiddleware(
 		router.Router(db, rdb),
+		mw.RequestID,
 		mw.Cors,
 		mw.ResponseTimeMiddleware,
 		mw.HPP(hppOptions),

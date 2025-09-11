@@ -26,15 +26,17 @@ func Cors(next http.Handler) http.Handler {
 			w.Header().Set("Vary", "Origin")
 		}
 
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		// Allow common headers + our Request-ID
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Request-ID")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, PUT, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Credentials", "true")
 		w.Header().Set("Access-Control-Max-Age", "3600")
 
-		// Expose useful headers to the browser
+		// Expose useful response headers to the browser (incl. X-Request-ID)
 		w.Header().Set("Access-Control-Expose-Headers",
-			"Authorization, X-RateLimit-Policy, X-RateLimit-Limit, X-RateLimit-Remaining, Retry-After, X-Response-Time")
+			"Authorization, X-Request-ID, X-RateLimit-Policy, X-RateLimit-Limit, X-RateLimit-Remaining, Retry-After, X-Response-Time")
 
+		// Fast-path preflight
 		if r.Method == http.MethodOptions {
 			w.Header().Add("Vary", "Access-Control-Request-Method")
 			w.Header().Add("Vary", "Access-Control-Request-Headers")

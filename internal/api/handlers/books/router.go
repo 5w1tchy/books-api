@@ -20,6 +20,10 @@ func Handler(db *sql.DB) http.HandlerFunc {
 			handleCreate(db, w, r)
 		case http.MethodPatch:
 			handlePatch(db, w, r)
+		case http.MethodPut:
+			handlePut(db, w, r)
+		case http.MethodDelete:
+			handleDelete(db, w, r)
 		default:
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}
