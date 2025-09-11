@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+
+	"github.com/5w1tchy/books-api/internal/api/apperr"
 )
 
 const (
@@ -112,7 +114,7 @@ JOIN authors a ON a.id = b.author_id
 
 	var total int
 	if err := db.QueryRow(qCount, args...).Scan(&total); err != nil {
-		http.Error(w, "DB error", http.StatusInternalServerError)
+		apperr.WriteStatus(w, r, http.StatusInternalServerError, "DB error", "Failed to count books")
 		return
 	}
 
@@ -150,7 +152,7 @@ ORDER BY GREATEST(
 
 	rows, err := db.Query(qRows, append(args, limit, offset)...)
 	if err != nil {
-		http.Error(w, "DB error", http.StatusInternalServerError)
+		apperr.WriteStatus(w, r, http.StatusInternalServerError, "DB error", "Failed to list books")
 		return
 	}
 	defer rows.Close()
@@ -160,7 +162,7 @@ ORDER BY GREATEST(
 		var pb PublicBook
 		var slugsJSON []byte
 		if err := rows.Scan(&pb.ID, &pb.ShortID, &pb.Slug, &pb.Title, &pb.Author, &slugsJSON); err != nil {
-			http.Error(w, "DB scan error", http.StatusInternalServerError)
+			apperr.WriteStatus(w, r, http.StatusInternalServerError, "DB scan error", "Failed to read books")
 			return
 		}
 		_ = json.Unmarshal(slugsJSON, &pb.CategorySlugs)

@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"net/http"
 	"strings"
+
+	"github.com/5w1tchy/books-api/internal/api/apperr"
 )
 
 const allowBooks = "GET, POST, PATCH, PUT, DELETE, OPTIONS, HEAD"
@@ -36,7 +38,7 @@ func Handler(db *sql.DB) http.HandlerFunc {
 
 		default:
 			w.Header().Set("Allow", allowBooks)
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			apperr.WriteStatus(w, r, http.StatusMethodNotAllowed, "Method Not Allowed", "")
 		}
 	}
 }

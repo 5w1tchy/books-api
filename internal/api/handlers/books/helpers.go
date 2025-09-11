@@ -19,7 +19,8 @@ func resolveBookKey(key string) (cond string, arg any) {
 		n, _ := strconv.ParseInt(key, 10, 64)
 		return "b.short_id = $1", n
 	}
-	if looksLikeUUID(key) {
+	// Use strict UUID detection from id_guard.go
+	if isUUID(key) {
 		return "b.id = $1", key
 	}
 	return "b.slug = $1", key
@@ -36,7 +37,6 @@ func isDigits(s string) bool {
 	}
 	return true
 }
-func looksLikeUUID(s string) bool { return len(s) == 36 && strings.Count(s, "-") == 4 }
 
 func dedupSlugs(in []string) []string {
 	seen := make(map[string]struct{}, len(in))
@@ -73,7 +73,7 @@ func slugify(s string) string {
 
 func ensureUniqueSlug(tx *sql.Tx, table, col, base string, maxTries int) (string, error) {
 	slug := base
-	for i := 1; i <= maxTries; i++ {
+	for i := 0; i < maxTries; i++ {
 		var exists bool
 		q := `SELECT EXISTS (SELECT 1 FROM ` + table + ` WHERE ` + col + ` = $1)`
 		if err := tx.QueryRow(q, slug).Scan(&exists); err != nil {
@@ -82,6 +82,7 @@ func ensureUniqueSlug(tx *sql.Tx, table, col, base string, maxTries int) (string
 		if !exists {
 			return slug, nil
 		}
+		// next try: base-1, base-2, ...
 		slug = base + "-" + strconv.Itoa(i+1)
 	}
 	return "", fmt.Errorf("could not create unique slug for %q", base)
@@ -117,6 +118,7 @@ func toInt(s string, def int) int {
 	}
 	return n
 }
+
 func clamp(v, lo, hi int) int {
 	if v < lo {
 		return lo
@@ -126,6 +128,7 @@ func clamp(v, lo, hi int) int {
 	}
 	return v
 }
+
 func max(a, b int) int {
 	if a > b {
 		return a

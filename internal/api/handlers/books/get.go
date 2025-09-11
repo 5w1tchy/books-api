@@ -5,8 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"slices"
 	"strings"
+
+	"github.com/5w1tchy/books-api/internal/api/apperr"
 )
 
 func handleGet(db *sql.DB, w http.ResponseWriter, r *http.Request, key string) {
@@ -33,26 +34,31 @@ func handleGet(db *sql.DB, w http.ResponseWriter, r *http.Request, key string) {
 	if err := db.QueryRow(qOne, arg).
 		Scan(&pb.ID, &pb.ShortID, &pb.Slug, &pb.Title, &pb.Author, &slugsJSON, &pb.Summary, &pb.Short, &pb.Coda); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			http.Error(w, "Book not found", http.StatusNotFound)
+			apperr.WriteStatus(w, r, http.StatusNotFound, "Not Found", "Book not found")
 			return
 		}
-		http.Error(w, "DB error", http.StatusInternalServerError)
+		apperr.WriteStatus(w, r, http.StatusInternalServerError, "DB error", "Failed to fetch book")
 		return
 	}
 	_ = json.Unmarshal(slugsJSON, &pb.CategorySlugs)
 	pb.URL = "/books/" + pb.Slug
 
-	// Optional: fields=summary,short,coda to trim heavy fields
-	if f := strings.TrimSpace(r.URL.Query().Get("fields")); f != "" {
-		fields := strings.Split(f, ",")
-		keep := func(s string) bool { return slices.Contains(fields, s) }
-		if !keep("summary") {
+	// Optional: fields=summary,short,coda (case/space-insensitive)
+	if raw := strings.TrimSpace(r.URL.Query().Get("fields")); raw != "" {
+		keep := map[string]struct{}{}
+		for _, f := range strings.Split(raw, ",") {
+			f = strings.ToLower(strings.TrimSpace(f))
+			if f != "" {
+				keep[f] = struct{}{}
+			}
+		}
+		if _, ok := keep["summary"]; !ok {
 			pb.Summary = ""
 		}
-		if !keep("short") {
+		if _, ok := keep["short"]; !ok {
 			pb.Short = ""
 		}
-		if !keep("coda") {
+		if _, ok := keep["coda"]; !ok {
 			pb.Coda = ""
 		}
 	}
