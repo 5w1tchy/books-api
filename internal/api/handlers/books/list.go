@@ -71,11 +71,9 @@ EXISTS (
 		i++
 	}
 
-	// q = fuzzy, accent-insensitive (uses immutable_unaccent)
-	// also apply a similarity threshold: min_sim (default 0.20; for very short queries <=3 chars use 0.10)
+	// q = fuzzy, accent-insensitive
 	qIdx, minIdx := -1, -1
 	if q != "" {
-		// defaults
 		defMin := 0.20
 		if len([]rune(q)) <= 3 {
 			defMin = 0.10
@@ -86,16 +84,12 @@ EXISTS (
 				minSim = f
 			}
 		}
-
 		qIdx = i
 		args = append(args, q)
 		i++
-
 		minIdx = i
 		args = append(args, minSim)
 		i++
-
-		// Accept exact substring OR fuzzy similarity above threshold
 		where = append(where, `(
   public.immutable_unaccent(lower(b.title)) LIKE '%' || public.immutable_unaccent(lower($`+strconv.Itoa(qIdx)+`)) || '%'
   OR public.immutable_unaccent(lower(a.name))  LIKE '%' || public.immutable_unaccent(lower($`+strconv.Itoa(qIdx)+`)) || '%'
@@ -122,10 +116,10 @@ JOIN authors a ON a.id = b.author_id
 		return
 	}
 
-	// ----- page rows -----
+	// ----- page rows (NOW includes slug) -----
 	qRows := `
 SELECT
-  b.id, b.short_id, b.title, a.name,
+  b.id, b.short_id, b.slug, b.title, a.name,
   COALESCE(json_agg(DISTINCT c_all.slug) FILTER (WHERE c_all.slug IS NOT NULL), '[]')
 FROM books b
 JOIN authors a                ON a.id = b.author_id
@@ -136,7 +130,7 @@ LEFT JOIN categories c_all    ON c_all.id = bc1.category_id
 		qRows += "WHERE " + strings.Join(where, " AND ") + "\n"
 	}
 	qRows += `
-GROUP BY b.id, b.short_id, b.title, a.name
+GROUP BY b.id, b.short_id, b.slug, b.title, a.name
 `
 
 	// ranked when q present, else recency
@@ -165,11 +159,12 @@ ORDER BY GREATEST(
 	for rows.Next() {
 		var pb PublicBook
 		var slugsJSON []byte
-		if err := rows.Scan(&pb.ID, &pb.ShortID, &pb.Title, &pb.Author, &slugsJSON); err != nil {
+		if err := rows.Scan(&pb.ID, &pb.ShortID, &pb.Slug, &pb.Title, &pb.Author, &slugsJSON); err != nil {
 			http.Error(w, "DB scan error", http.StatusInternalServerError)
 			return
 		}
 		_ = json.Unmarshal(slugsJSON, &pb.CategorySlugs)
+		pb.URL = "/books/" + pb.Slug
 		out = append(out, pb)
 	}
 
@@ -191,30 +186,4 @@ ORDER BY GREATEST(
 		"next_offset": nextOffset,
 		"data":        out,
 	})
-}
-
-func toInt(s string, def int) int {
-	if s == "" {
-		return def
-	}
-	n, err := strconv.Atoi(s)
-	if err != nil {
-		return def
-	}
-	return n
-}
-func clamp(v, lo, hi int) int {
-	if v < lo {
-		return lo
-	}
-	if v > hi {
-		return hi
-	}
-	return v
-}
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
 }

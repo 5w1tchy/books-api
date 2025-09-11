@@ -3,9 +3,12 @@ package books
 type PublicBook struct {
 	ID            string   `json:"id"`
 	ShortID       int64    `json:"short_id"`
+	Slug          string   `json:"slug"`
 	Title         string   `json:"title"`
 	Author        string   `json:"author"`
 	CategorySlugs []string `json:"category_slugs"`
+	URL           string   `json:"url,omitempty"`
+
 	// heavy fields (single-book)
 	Summary string `json:"summary,omitempty"`
 	Short   string `json:"short,omitempty"`

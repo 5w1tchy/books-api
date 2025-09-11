@@ -17,7 +17,7 @@ func handleGet(db *sql.DB, w http.ResponseWriter, r *http.Request, key string) {
 	// NOTE: var (not const) because we concatenate cond.
 	qOne := `
 	SELECT
-		b.id, b.short_id, b.title, a.name,
+		b.id, b.short_id, b.slug, b.title, a.name,
 		COALESCE(json_agg(c.slug) FILTER (WHERE c.slug IS NOT NULL), '[]'),
 		COALESCE(bo.summary, ''), COALESCE(bo.short, ''), COALESCE(bo.coda, '')
 	FROM books b
@@ -26,12 +26,12 @@ func handleGet(db *sql.DB, w http.ResponseWriter, r *http.Request, key string) {
 	LEFT JOIN categories c        ON c.id = bc.category_id
 	LEFT JOIN book_outputs bo     ON bo.book_id = b.id
 	WHERE ` + cond + `
-	GROUP BY b.id, b.short_id, b.title, a.name, bo.summary, bo.short, bo.coda`
+	GROUP BY b.id, b.short_id, b.slug, b.title, a.name, bo.summary, bo.short, bo.coda`
 
 	var pb PublicBook
 	var slugsJSON []byte
 	if err := db.QueryRow(qOne, arg).
-		Scan(&pb.ID, &pb.ShortID, &pb.Title, &pb.Author, &slugsJSON, &pb.Summary, &pb.Short, &pb.Coda); err != nil {
+		Scan(&pb.ID, &pb.ShortID, &pb.Slug, &pb.Title, &pb.Author, &slugsJSON, &pb.Summary, &pb.Short, &pb.Coda); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			http.Error(w, "Book not found", http.StatusNotFound)
 			return
@@ -40,6 +40,7 @@ func handleGet(db *sql.DB, w http.ResponseWriter, r *http.Request, key string) {
 		return
 	}
 	_ = json.Unmarshal(slugsJSON, &pb.CategorySlugs)
+	pb.URL = "/books/" + pb.Slug
 
 	// Optional: fields=summary,short,coda to trim heavy fields
 	if f := strings.TrimSpace(r.URL.Query().Get("fields")); f != "" {

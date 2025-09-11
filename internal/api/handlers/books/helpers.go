@@ -106,3 +106,29 @@ func getOrCreateAuthor(tx *sql.Tx, name string) (id string, slug string, err err
 	}
 	return id, slug, nil
 }
+
+func toInt(s string, def int) int {
+	if s == "" {
+		return def
+	}
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		return def
+	}
+	return n
+}
+func clamp(v, lo, hi int) int {
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
+}
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
