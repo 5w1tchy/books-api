@@ -8,7 +8,6 @@ import (
 var allowedOrigins = []string{
 	"http://localhost:5173",
 	"http://127.0.0.1:5173",
-	// add your future frontend origin here (e.g., "https://books-ui.onrender.com")
 }
 
 func Cors(next http.Handler) http.Handler {
@@ -28,7 +27,7 @@ func Cors(next http.Handler) http.Handler {
 
 		// Allow common headers + our Request-ID
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Request-ID")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, PUT, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, HEAD, POST, PATCH, PUT, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Credentials", "true")
 		w.Header().Set("Access-Control-Max-Age", "3600")
 
