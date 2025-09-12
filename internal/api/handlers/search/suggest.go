@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/5w1tchy/books-api/internal/api/apperr"
 )
 
 type SuggestItem struct {
@@ -93,7 +95,7 @@ func Suggest(db *sql.DB) http.HandlerFunc {
 		authorFilter := strings.TrimSpace(r.URL.Query().Get("author")) // author slug
 
 		// --- AUTHORS (word-aware both directions) ---
-		authRows, err := db.Query(`
+		authRows, err := db.QueryContext(r.Context(), `
 WITH iq AS (SELECT public.immutable_unaccent(lower($1)) AS q)
 SELECT
   a.slug,
@@ -118,7 +120,7 @@ ORDER BY score DESC, a.name ASC
 LIMIT $3
 `, q, minSim, limit)
 		if err != nil {
-			http.Error(w, "DB error", http.StatusInternalServerError)
+			apperr.WriteStatus(w, r, http.StatusInternalServerError, "DB error", "Failed to search authors")
 			return
 		}
 		defer authRows.Close()
@@ -129,7 +131,7 @@ LIMIT $3
 			var booksCount int
 			var score float64
 			if err := authRows.Scan(&slug, &name, &booksCount, &score); err != nil {
-				http.Error(w, "DB scan error", http.StatusInternalServerError)
+				apperr.WriteStatus(w, r, http.StatusInternalServerError, "DB scan error", "Failed to read authors")
 				return
 			}
 			lbl := name
@@ -216,9 +218,9 @@ JOIN authors a ON a.id = b.author_id
 		qBooks += "ORDER BY score DESC, b.title ASC LIMIT $" + strconv.Itoa(i)
 		args = append(args, limit)
 
-		bookRows, err := db.Query(qBooks, args...)
+		bookRows, err := db.QueryContext(r.Context(), qBooks, args...)
 		if err != nil {
-			http.Error(w, "DB error", http.StatusInternalServerError)
+			apperr.WriteStatus(w, r, http.StatusInternalServerError, "DB error", "Failed to search books")
 			return
 		}
 		defer bookRows.Close()
@@ -229,7 +231,7 @@ JOIN authors a ON a.id = b.author_id
 			var shortID int64
 			var score float64
 			if err := bookRows.Scan(&id, &shortID, &title, &bslug, &aname, &aslug, &score); err != nil {
-				http.Error(w, "DB scan error", http.StatusInternalServerError)
+				apperr.WriteStatus(w, r, http.StatusInternalServerError, "DB scan error", "Failed to read books")
 				return
 			}
 			lbl := title + " — " + aname

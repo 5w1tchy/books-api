@@ -3,22 +3,25 @@ package books
 import (
 	"database/sql"
 	"net/http"
-	"strings"
 )
 
-// HEAD semantics:
-// - /books/      → 200 (collection exists)
-// - /books/{key} → 200 if exists, 404 if not (no body)
 func handleHead(db *sql.DB, w http.ResponseWriter, r *http.Request) {
-	idPart := strings.Trim(strings.TrimPrefix(r.URL.Path, "/books/"), "/")
-	if idPart == "" {
-		w.WriteHeader(http.StatusOK)
+	key := r.PathValue("key")
+	if key == "" {
+		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
-	cond, arg := resolveBookKey(idPart)
+	cond, arg := resolveBookKey(key)
 
 	var exists bool
-	if err := db.QueryRow(`SELECT EXISTS (SELECT 1 FROM books b WHERE `+cond+`)`, arg).Scan(&exists); err != nil {
+	if err := db.QueryRowContext(
+		r.Context(),
+		`SELECT EXISTS(
+		   SELECT 1 FROM books b
+		   JOIN authors a ON a.id = b.author_id
+		   WHERE `+cond+`)`,
+		arg,
+	).Scan(&exists); err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}

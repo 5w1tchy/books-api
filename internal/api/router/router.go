@@ -3,7 +3,6 @@ package router
 import (
 	"database/sql"
 	"net/http"
-	"strings"
 
 	"github.com/5w1tchy/books-api/internal/api/handlers"
 	"github.com/5w1tchy/books-api/internal/api/handlers/books"
@@ -14,54 +13,32 @@ import (
 func Router(db *sql.DB, rdb *redis.Client) http.Handler {
 	mux := http.NewServeMux()
 
-	mux.HandleFunc("/", handlers.RootHandler)
+	// Root
+	mux.HandleFunc("GET /", handlers.RootHandler)
 
-	mux.HandleFunc("/users/", handlers.UsersHandler)
+	// Users (can modernize later if you want)
+	mux.HandleFunc("GET /users", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/users/", http.StatusMovedPermanently)
+	})
 
-	// keep legacy /books (no slash) -> /books/
-	mux.HandleFunc("/books", func(w http.ResponseWriter, r *http.Request) {
+	// Keep legacy /books -> /books/
+	mux.HandleFunc("GET /books", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/books/", http.StatusMovedPermanently)
 	})
 
-	// Redirect /books?author=slug (and no other filters) -> /authors/slug
-	booksHandler := books.Handler(db)
-	mux.HandleFunc("/books/", func(w http.ResponseWriter, r *http.Request) {
-		q := r.URL.Query()
-		author := strings.TrimSpace(q.Get("author"))
+	// Books (method-specific + 1.22 patterns)
+	mux.Handle("GET /books/", books.Handler(db))          // list
+	mux.Handle("POST /books/", books.Handler(db))         // create
+	mux.Handle("GET /books/{key}", books.Handler(db))     // get
+	mux.Handle("HEAD /books/{key}", books.Handler(db))    // head
+	mux.Handle("PATCH /books/{key}", books.Handler(db))   // patch
+	mux.Handle("PUT /books/{key}", books.Handler(db))     // put
+	mux.Handle("DELETE /books/{key}", books.Handler(db))  // delete
+	mux.Handle("OPTIONS /books/", books.Handler(db))      // preflight
+	mux.Handle("OPTIONS /books/{key}", books.Handler(db)) // preflight
 
-		if author != "" &&
-			q.Get("q") == "" &&
-			q.Get("categories") == "" &&
-			q.Get("match") == "" &&
-			q.Get("min_sim") == "" &&
-			q.Get("limit") == "" &&
-			q.Get("offset") == "" {
-			http.Redirect(w, r, "/authors/"+author, http.StatusMovedPermanently)
-			return
-		}
+	// Search
+	mux.Handle("GET /search/suggest", search.Suggest(db))
 
-		booksHandler.ServeHTTP(w, r)
-	})
-
-	mux.HandleFunc("/categories", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/categories/", http.StatusMovedPermanently)
-	})
-	mux.HandleFunc("/categories/", handlers.CategoriesHandler(db))
-
-	mux.HandleFunc("/authors", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/authors/", http.StatusMovedPermanently)
-	})
-	mux.HandleFunc("/authors/", handlers.AuthorsHandler(db))
-
-	// new mixed autocomplete
-	mux.HandleFunc("GET /search/suggest", search.Suggest(db))
-
-	// redirect
-	mux.HandleFunc("/for-you", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/for-you/", http.StatusMovedPermanently)
-	})
-	mux.HandleFunc("/for-you/", handlers.ForYouHandler(db, rdb))
-
-	mux.HandleFunc("GET /healthz", handlers.Healthz)
 	return mux
 }

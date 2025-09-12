@@ -23,8 +23,8 @@ func handleList(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 	offset := max(0, toInt(r.URL.Query().Get("offset"), 0))
 
 	// filters
-	q := strings.TrimSpace(r.URL.Query().Get("q"))           // free-text (fuzzy)
-	author := strings.TrimSpace(r.URL.Query().Get("author")) // author slug
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	author := strings.TrimSpace(r.URL.Query().Get("author"))
 	match := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("match")))
 	if match != "all" {
 		match = "any"
@@ -38,19 +38,17 @@ func handleList(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// ----- shared WHERE (reused by count + rows) -----
+	// WHERE builder
 	where := []string{}
 	args := []any{}
 	i := 1
 
-	// author (by slug)
 	if author != "" {
 		where = append(where, "a.slug = $"+strconv.Itoa(i))
 		args = append(args, author)
 		i++
 	}
 
-	// categories (ANY vs ALL)
 	if len(cats) > 0 {
 		if match == "any" {
 			where = append(where, `
@@ -73,7 +71,6 @@ EXISTS (
 		i++
 	}
 
-	// q = fuzzy, accent-insensitive
 	qIdx, minIdx := -1, -1
 	if q != "" {
 		defMin := 0.20
@@ -102,7 +99,7 @@ EXISTS (
 )`)
 	}
 
-	// ----- total count (with filters) -----
+	// count
 	qCount := `
 SELECT COUNT(*)
 FROM books b
@@ -111,14 +108,13 @@ JOIN authors a ON a.id = b.author_id
 	if len(where) > 0 {
 		qCount += "WHERE " + strings.Join(where, " AND ") + "\n"
 	}
-
 	var total int
-	if err := db.QueryRow(qCount, args...).Scan(&total); err != nil {
+	if err := db.QueryRowContext(r.Context(), qCount, args...).Scan(&total); err != nil {
 		apperr.WriteStatus(w, r, http.StatusInternalServerError, "DB error", "Failed to count books")
 		return
 	}
 
-	// ----- page rows (NOW includes slug) -----
+	// rows
 	qRows := `
 SELECT
   b.id, b.short_id, b.slug, b.title, a.name,
@@ -134,8 +130,6 @@ LEFT JOIN categories c_all    ON c_all.id = bc1.category_id
 	qRows += `
 GROUP BY b.id, b.short_id, b.slug, b.title, a.name
 `
-
-	// ranked when q present, else recency
 	if qIdx != -1 {
 		qRows += `
 ORDER BY GREATEST(
@@ -146,11 +140,9 @@ ORDER BY GREATEST(
 	} else {
 		qRows += "ORDER BY b.created_at DESC\n"
 	}
-
-	// add limit/offset bindings
 	qRows += "LIMIT $" + strconv.Itoa(i) + " OFFSET $" + strconv.Itoa(i+1)
 
-	rows, err := db.Query(qRows, append(args, limit, offset)...)
+	rows, err := db.QueryContext(r.Context(), qRows, append(args, limit, offset)...)
 	if err != nil {
 		apperr.WriteStatus(w, r, http.StatusInternalServerError, "DB error", "Failed to list books")
 		return
@@ -170,7 +162,6 @@ ORDER BY GREATEST(
 		out = append(out, pb)
 	}
 
-	// meta
 	hasMore := offset+len(out) < total
 	var nextOffset *int
 	if hasMore {

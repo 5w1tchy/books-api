@@ -14,8 +14,6 @@ func handleGet(db *sql.DB, w http.ResponseWriter, r *http.Request, key string) {
 	w.Header().Set("Content-Type", "application/json")
 
 	cond, arg := resolveBookKey(key)
-
-	// NOTE: var (not const) because we concatenate cond.
 	qOne := `
 	SELECT
 		b.id, b.short_id, b.slug, b.title, a.name,
@@ -31,7 +29,7 @@ func handleGet(db *sql.DB, w http.ResponseWriter, r *http.Request, key string) {
 
 	var pb PublicBook
 	var slugsJSON []byte
-	if err := db.QueryRow(qOne, arg).
+	if err := db.QueryRowContext(r.Context(), qOne, arg).
 		Scan(&pb.ID, &pb.ShortID, &pb.Slug, &pb.Title, &pb.Author, &slugsJSON, &pb.Summary, &pb.Short, &pb.Coda); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			apperr.WriteStatus(w, r, http.StatusNotFound, "Not Found", "Book not found")
@@ -43,7 +41,7 @@ func handleGet(db *sql.DB, w http.ResponseWriter, r *http.Request, key string) {
 	_ = json.Unmarshal(slugsJSON, &pb.CategorySlugs)
 	pb.URL = "/books/" + pb.Slug
 
-	// Optional: fields=summary,short,coda (case/space-insensitive)
+	// fields=summary,short,coda (case/space-insensitive)
 	if raw := strings.TrimSpace(r.URL.Query().Get("fields")); raw != "" {
 		keep := map[string]struct{}{}
 		for _, f := range strings.Split(raw, ",") {

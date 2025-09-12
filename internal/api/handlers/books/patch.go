@@ -14,16 +14,16 @@ func handlePatch(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	defer r.Body.Close()
 
-	idPart := strings.Trim(strings.TrimPrefix(r.URL.Path, "/books/"), "/")
-	if idPart == "" {
+	key := r.PathValue("key")
+	if key == "" {
 		apperr.WriteStatus(w, r, http.StatusBadRequest, "Bad Request", "missing book key")
 		return
 	}
-	if !isUUID(idPart) {
+	if !isUUID(key) {
 		apperr.WriteStatus(w, r, http.StatusBadRequest, "Bad Request", "id must be a UUID")
 		return
 	}
-	bookID := idPart
+	bookID := key
 
 	var dto UpdateBookDTO
 	dec := json.NewDecoder(r.Body)
@@ -37,7 +37,7 @@ func handlePatch(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tx, err := db.Begin()
+	tx, err := db.BeginTx(r.Context(), nil)
 	if err != nil {
 		apperr.WriteStatus(w, r, http.StatusInternalServerError, "TX begin failed", "")
 		return
@@ -46,7 +46,9 @@ func handlePatch(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 
 	// Early existence check (clean 404)
 	var exists bool
-	if err := tx.QueryRow(`SELECT EXISTS (SELECT 1 FROM books WHERE id = $1)`, bookID).Scan(&exists); err != nil {
+	if err := tx.QueryRowContext(r.Context(),
+		`SELECT EXISTS (SELECT 1 FROM books WHERE id = $1)`, bookID).
+		Scan(&exists); err != nil {
 		apperr.WriteStatus(w, r, http.StatusInternalServerError, "lookup failed", "")
 		return
 	}
@@ -90,7 +92,7 @@ func handlePatch(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 	if len(set) > 0 {
 		args = append(args, bookID)
 		q := "UPDATE books SET " + strings.Join(set, ", ") + " WHERE id = $" + strconv.Itoa(len(args))
-		if _, err := tx.Exec(q, args...); err != nil {
+		if _, err := tx.ExecContext(r.Context(), q, args...); err != nil {
 			if apperr.HandleDBError(w, r, err, "update failed") {
 				return
 			}
@@ -104,13 +106,14 @@ func handlePatch(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 			apperr.WriteStatus(w, r, http.StatusBadRequest, "Bad Request", "category_slugs cannot be empty")
 			return
 		}
-		if _, err := tx.Exec(`DELETE FROM book_categories WHERE book_id = $1`, bookID); err != nil {
+		if _, err := tx.ExecContext(r.Context(),
+			`DELETE FROM book_categories WHERE book_id = $1`, bookID); err != nil {
 			if apperr.HandleDBError(w, r, err, "failed to clear categories") {
 				return
 			}
 		}
 		for _, s := range slugs {
-			res, err := tx.Exec(`
+			res, err := tx.ExecContext(r.Context(), `
 				INSERT INTO book_categories (book_id, category_id)
 				SELECT $1, c.id FROM categories c WHERE c.slug = $2
 			`, bookID, s)
