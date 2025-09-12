@@ -19,7 +19,6 @@ const (
 	featureCooldown = 90 * 24 * time.Hour
 )
 
-// Build assembles the feed sections with Redis caching bound to the product day.
 func Build(ctx context.Context, db *sql.DB, rdb *redis.Client, lim Limits, f Fields) (Sections, error) {
 	tz := mustTZ(productTZName)
 	now := time.Now().In(tz)
@@ -51,19 +50,28 @@ func Build(ctx context.Context, db *sql.DB, rdb *redis.Client, lim Limits, f Fie
 
 	shorts, err := pickShorts(ctx, db, lim.Shorts, today, tomorrow, rng)
 	if err != nil {
-		return Sections{}, err
+		return Sections{}, fmt.Errorf("pickShorts: %w", err)
 	}
 	recs, err := pickRecs(ctx, db, lim.Recs, shorts, rng, f)
 	if err != nil {
-		return Sections{}, err
+		return Sections{}, fmt.Errorf("pickRecs: %w", err)
+	}
+	if recs == nil {
+		recs = make([]BookLite, 0)
 	}
 	trending, err := pickTrending(ctx, db, lim.Trending, f)
 	if err != nil {
-		return Sections{}, err
+		return Sections{}, fmt.Errorf("pickTrending: %w", err)
+	}
+	if trending == nil {
+		trending = make([]BookLite, 0)
 	}
 	newest, err := pickNewest(ctx, db, lim.New, f)
 	if err != nil {
-		return Sections{}, err
+		return Sections{}, fmt.Errorf("pickNewest: %w", err)
+	}
+	if newest == nil {
+		newest = make([]BookLite, 0)
 	}
 
 	sec := Sections{
@@ -92,12 +100,12 @@ func pickShorts(ctx context.Context, db *sql.DB, limit int, today, tomorrow time
 	}
 
 	const qToday = `
-SELECT b.id, b.slug, b.title, a.name, bo.short
+SELECT b.id, b.slug, b.title, a.name, bo.short::text AS short
 FROM book_outputs bo
-JOIN books b ON b.id = bo.book_id
+JOIN books b   ON b.id = bo.book_id
 JOIN authors a ON a.id = b.author_id
 WHERE bo.short_enabled
-  AND COALESCE(bo.short,'') <> ''
+  AND bo.short IS NOT NULL AND bo.short::text <> '""'
   AND bo.short_last_featured_at >= $1
   AND bo.short_last_featured_at <  $2
 ORDER BY bo.short_last_featured_at ASC, b.created_at DESC
@@ -123,12 +131,12 @@ LIMIT $3;`
 		cutoff := today.Add(-featureCooldown)
 
 		const qEligible = `
-SELECT b.id, b.slug, b.title, a.name, bo.short, bo.short_last_featured_at
+SELECT b.id, b.slug, b.title, a.name, bo.short::text AS short, bo.short_last_featured_at
 FROM book_outputs bo
-JOIN books b ON b.id = bo.book_id
+JOIN books b   ON b.id = bo.book_id
 JOIN authors a ON a.id = b.author_id
 WHERE bo.short_enabled
-  AND COALESCE(bo.short,'') <> ''
+  AND bo.short IS NOT NULL AND bo.short::text <> '""'
   AND (bo.short_last_featured_at IS NULL OR bo.short_last_featured_at < $1)
 ORDER BY bo.short_last_featured_at NULLS FIRST, b.created_at DESC
 LIMIT $2;`
@@ -158,12 +166,12 @@ LIMIT $2;`
 
 		if len(picks) < limit {
 			const qFallback = `
-SELECT b.id, b.slug, b.title, a.name, bo.short
+SELECT b.id, b.slug, b.title, a.name, bo.short::text AS short
 FROM book_outputs bo
-JOIN books b ON b.id = bo.book_id
+JOIN books b   ON b.id = bo.book_id
 JOIN authors a ON a.id = b.author_id
 WHERE bo.short_enabled
-  AND COALESCE(bo.short,'') <> ''
+  AND bo.short IS NOT NULL AND bo.short::text <> '""'
   AND bo.short_last_featured_at IS NOT NULL
 ORDER BY bo.short_last_featured_at ASC, b.created_at DESC
 LIMIT $1;`
@@ -245,12 +253,13 @@ short_cats AS (
   SELECT DISTINCT c.id AS cat_id
   FROM books b
   JOIN book_categories bc ON bc.book_id = b.id
-  JOIN categories c ON c.id = bc.category_id
+  JOIN categories c       ON c.id = bc.category_id
   WHERE b.id IN (SELECT id FROM featured)
 ),
 recs AS (
-  SELECT DISTINCT b.id, b.slug, b.title, a.name,
-    COALESCE(json_agg(DISTINCT c.slug) FILTER (WHERE c.slug IS NOT NULL), '[]') AS slugs,
+  SELECT DISTINCT
+    b.id, b.slug, b.title, a.name,
+    COALESCE(jsonb_agg(DISTINCT c.slug) FILTER (WHERE c.slug IS NOT NULL), '[]'::jsonb) AS slugs,
     COALESCE(MAX(bo.summary), '') AS summary,
     MAX(b.created_at) AS newest
   FROM books b
@@ -285,7 +294,7 @@ SELECT id, slug, title, name, slugs, summary FROM recs;`
 	}
 	defer rows.Close()
 
-	var out []BookLite
+	out := make([]BookLite, 0, limit)
 	for rows.Next() {
 		var b BookLite
 		var slugsJSON []byte
@@ -316,14 +325,16 @@ func pickTrending(ctx context.Context, db *sql.DB, limit int, f Fields) ([]BookL
 	}
 	const q = `
 SELECT b.id, b.slug, b.title, a.name,
-       COALESCE(json_agg(DISTINCT c.slug) FILTER (WHERE c.slug IS NOT NULL), '[]') AS slugs,
+       COALESCE(jsonb_agg(DISTINCT c.slug) FILTER (WHERE c.slug IS NOT NULL), '[]'::jsonb) AS slugs,
        COALESCE(MAX(bo.summary), '') AS summary
 FROM books b
 JOIN authors a               ON a.id = b.author_id
 LEFT JOIN book_categories bc ON bc.book_id = b.id
 LEFT JOIN categories c       ON c.id = bc.category_id
 LEFT JOIN book_outputs bo    ON bo.book_id = b.id
-WHERE COALESCE(bo.short,'') <> '' AND bo.short_enabled
+WHERE bo.short IS NOT NULL
+  AND bo.short::text NOT IN ('', '""')
+  AND bo.short_enabled
 GROUP BY b.id, b.slug, b.title, a.name, bo.short_last_featured_at
 ORDER BY bo.short_last_featured_at DESC NULLS LAST, b.created_at DESC
 LIMIT $1;`
@@ -333,7 +344,7 @@ LIMIT $1;`
 	}
 	defer rows.Close()
 
-	var out []BookLite
+	out := make([]BookLite, 0, limit)
 	for rows.Next() {
 		var b BookLite
 		var slugsJSON []byte
@@ -359,7 +370,7 @@ func pickNewest(ctx context.Context, db *sql.DB, limit int, f Fields) ([]BookLit
 	}
 	const q = `
 SELECT b.id, b.slug, b.title, a.name,
-       COALESCE(json_agg(DISTINCT c.slug) FILTER (WHERE c.slug IS NOT NULL), '[]') AS slugs,
+       COALESCE(jsonb_agg(DISTINCT c.slug) FILTER (WHERE c.slug IS NOT NULL), '[]'::jsonb) AS slugs,
        COALESCE(MAX(bo.summary), '') AS summary
 FROM books b
 JOIN authors a               ON a.id = b.author_id
@@ -375,7 +386,7 @@ LIMIT $1;`
 	}
 	defer rows.Close()
 
-	var out []BookLite
+	out := make([]BookLite, 0, limit)
 	for rows.Next() {
 		var b BookLite
 		var slugsJSON []byte

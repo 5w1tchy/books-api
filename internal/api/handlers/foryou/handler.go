@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 
@@ -32,6 +33,9 @@ func Handler(db *sql.DB, rdb *redis.Client) http.HandlerFunc {
 
 		sec, err := storeforyou.Build(r.Context(), db, rdb, lim, fields)
 		if err != nil {
+			// minimal structured log with request id (if present)
+			rid := r.Header.Get("X-Request-ID")
+			log.Printf("[for-you] build failed rid=%s path=%s q=%q err=%v", rid, r.URL.Path, r.URL.RawQuery, err)
 			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 			return
 		}
