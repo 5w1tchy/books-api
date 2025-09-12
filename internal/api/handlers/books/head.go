@@ -3,29 +3,23 @@ package books
 import (
 	"database/sql"
 	"net/http"
+
+	"github.com/5w1tchy/books-api/internal/repo/booksrepo"
 )
 
 func handleHead(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 	key := r.PathValue("key")
 	if key == "" {
-		w.WriteHeader(http.StatusBadRequest)
+		// Not routed in your mux; treat as not found.
+		w.WriteHeader(http.StatusNotFound)
 		return
 	}
-	cond, arg := resolveBookKey(key)
-
-	var exists bool
-	if err := db.QueryRowContext(
-		r.Context(),
-		`SELECT EXISTS(
-		   SELECT 1 FROM books b
-		   JOIN authors a ON a.id = b.author_id
-		   WHERE `+cond+`)`,
-		arg,
-	).Scan(&exists); err != nil {
+	ok, err := booksrepo.ExistsByKey(r.Context(), db, key)
+	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
-	if !exists {
+	if !ok {
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
