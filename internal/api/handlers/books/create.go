@@ -3,65 +3,58 @@ package books
 import (
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"net/http"
+	"strings"
 
-	"github.com/5w1tchy/books-api/internal/api/apperr"
-	"github.com/5w1tchy/books-api/internal/repo/booksrepo"
-	"github.com/5w1tchy/books-api/internal/validate"
+	storebooks "github.com/5w1tchy/books-api/internal/store/books"
 )
 
-func handleCreate(db *sql.DB, w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	defer r.Body.Close()
+type createReq struct {
+	Title         string   `json:"title"`
+	Author        string   `json:"author"`
+	CategorySlugs []string `json:"categories,omitempty"`
+}
 
-	var body struct {
-		Title         string   `json:"title"`
-		Author        string   `json:"author"`
-		CategorySlugs []string `json:"categories,omitempty"`
-	}
-	dec := json.NewDecoder(r.Body)
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&body); err != nil {
-		apperr.WriteStatus(w, r, http.StatusBadRequest, "Bad Request", "invalid JSON")
-		return
-	}
-
-	title, err := validate.RequireBounded("title", body.Title, 1, 200)
-	if err != nil {
-		apperr.WriteStatus(w, r, http.StatusBadRequest, "Bad Request", err.Error())
-		return
-	}
-	authorName, err := validate.RequireBounded("author", body.Author, 1, 120)
-	if err != nil {
-		apperr.WriteStatus(w, r, http.StatusBadRequest, "Bad Request", err.Error())
-		return
-	}
-	if len(body.CategorySlugs) > 0 {
-		if _, err := validate.ValidateCategorySlugs(body.CategorySlugs, 20); err != nil {
-			apperr.WriteStatus(w, r, http.StatusBadRequest, "Bad Request", err.Error())
+func create(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-	}
+		w.Header().Set("Content-Type", "application/json")
 
-	dto := booksrepo.CreateBookDTO{
-		Title:         title,
-		Author:        authorName,
-		CategorySlugs: body.CategorySlugs,
-	}
-	pb, err := booksrepo.Create(r.Context(), db, dto)
-	if err != nil {
-		switch {
-		case errors.Is(err, booksrepo.ErrInvalid):
-			apperr.WriteStatus(w, r, http.StatusBadRequest, "Bad Request", "invalid data")
-		case errors.Is(err, booksrepo.ErrConflict):
-			apperr.WriteStatus(w, r, http.StatusConflict, "Conflict", "duplicate")
-		default:
-			apperr.WriteStatus(w, r, http.StatusInternalServerError, "DB error", "create failed")
+		var req createReq
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, `{"status":"error","error":"invalid JSON"}`, http.StatusBadRequest)
+			return
 		}
-		return
-	}
 
-	w.WriteHeader(http.StatusCreated)
-	_ = json.NewEncoder(w).Encode(map[string]any{"status": "success", "data": pb})
+		req.Title = strings.TrimSpace(req.Title)
+		req.Author = strings.TrimSpace(req.Author)
+		if req.Title == "" || req.Author == "" {
+			http.Error(w, `{"status":"error","error":"title and author are required"}`, http.StatusBadRequest)
+			return
+		}
+
+		dto := storebooks.CreateBookDTO{
+			Title:         req.Title,
+			Author:        req.Author,
+			CategorySlugs: req.CategorySlugs,
+		}
+		book, err := storebooks.Create(r.Context(), db, dto)
+		if err != nil {
+			http.Error(w, `{"status":"error","error":"failed to create book"}`, http.StatusInternalServerError)
+			return
+		}
+
+		resp := struct {
+			Status string                `json:"status"`
+			Data   storebooks.PublicBook `json:"data"`
+		}{
+			Status: "success",
+			Data:   book,
+		}
+		enc := json.NewEncoder(w)
+		_ = enc.Encode(resp)
+	}
 }

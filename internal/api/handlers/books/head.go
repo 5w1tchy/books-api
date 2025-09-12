@@ -4,24 +4,29 @@ import (
 	"database/sql"
 	"net/http"
 
-	"github.com/5w1tchy/books-api/internal/repo/booksrepo"
+	storebooks "github.com/5w1tchy/books-api/internal/store/books"
 )
 
-func handleHead(db *sql.DB, w http.ResponseWriter, r *http.Request) {
-	key := r.PathValue("key")
-	if key == "" {
-		// Not routed in your mux; treat as not found.
-		w.WriteHeader(http.StatusNotFound)
-		return
+func head(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodHead {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		key := r.PathValue("key")
+		if key == "" {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		ok, err := storebooks.ExistsByKey(r.Context(), db, key)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		if !ok {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
 	}
-	ok, err := booksrepo.ExistsByKey(r.Context(), db, key)
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		return
-	}
-	if !ok {
-		w.WriteHeader(http.StatusNotFound)
-		return
-	}
-	w.WriteHeader(http.StatusOK)
 }

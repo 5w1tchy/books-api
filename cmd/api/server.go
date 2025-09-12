@@ -18,7 +18,6 @@ import (
 )
 
 func main() {
-	// Load env when running from cmd/api (local dev)
 	_ = godotenv.Load("../../.env")
 
 	db, err := sqlconnect.ConnectDB()
@@ -27,11 +26,10 @@ func main() {
 	}
 	defer db.Close()
 
-	// -------- Redis (Upstash) ----------
+	// -------- Redis ----------
 	var rdb *redis.Client
-
 	if url := os.Getenv("UPSTASH_REDIS_URL"); url != "" {
-		opt, err := redis.ParseURL(url) // rediss://default:<token>@host:6379
+		opt, err := redis.ParseURL(url)
 		if err != nil {
 			log.Fatalf("invalid UPSTASH_REDIS_URL: %v", err)
 		}
@@ -43,9 +41,9 @@ func main() {
 		opt.WriteTimeout = 1 * time.Second
 		rdb = redis.NewClient(opt)
 	} else {
-		addr := os.Getenv("REDIS_ADDR")     // host:port
-		user := os.Getenv("REDIS_USER")     // "default"
-		pass := os.Getenv("REDIS_PASSWORD") // token
+		addr := os.Getenv("REDIS_ADDR")
+		user := os.Getenv("REDIS_USER")
+		pass := os.Getenv("REDIS_PASSWORD")
 		if addr == "" || user == "" || pass == "" {
 			log.Fatal("missing Redis config: set UPSTASH_REDIS_URL or REDIS_ADDR/REDIS_USER/REDIS_PASSWORD")
 		}
@@ -61,14 +59,12 @@ func main() {
 		})
 	}
 
-	// Fail fast if Redis isn't reachable
 	if err := rdb.Ping(context.Background()).Err(); err != nil {
 		log.Fatalf("Redis connection failed: %v", err)
 	}
 
-	// -------- Rate limiting / middlewares ----------
+	// -------- Rate limiting: token-bucket only ----------
 	tb := mw.NewRedisTokenBucket(rdb, 5, 20, mw.PerIPKey("tb"))
-	sw := mw.NewRedisSlidingWindow(rdb, 3000, 60*time.Minute, mw.PerIPKey("sw"))
 
 	hppOptions := mw.DefaultHPPOptions()
 
@@ -79,12 +75,10 @@ func main() {
 		mw.ResponseTimeMiddleware,
 		mw.HPP(hppOptions),
 		tb.Middleware,
-		sw.Middleware,
 		mw.Compression,
 		mw.SecurityHeaders,
 	)
 
-	// -------- Serve: HTTP on Render, HTTPS locally ----------
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "3000"
@@ -95,17 +89,14 @@ func main() {
 		Handler: secureMux,
 	}
 
-	// If PORT is set (Render), run plain HTTP (Render terminates TLS at the edge)
 	if os.Getenv("PORT") != "" {
 		fmt.Println("Server (Render) listening on port:", port, "(HTTP)")
 		log.Fatal(server.ListenAndServe())
 	}
 
-	// Local dev: use mkcert certs for HTTPS
 	cert := "cert.pem"
 	key := "key.pem"
 	server.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12}
-
 	fmt.Println("Server (local) listening on port:", port, "(HTTPS)")
 	log.Fatal(server.ListenAndServeTLS(cert, key))
 }

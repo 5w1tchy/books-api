@@ -3,37 +3,38 @@ package books
 import (
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"net/http"
 
-	"github.com/5w1tchy/books-api/internal/api/apperr"
-	"github.com/5w1tchy/books-api/internal/repo/booksrepo"
-	"github.com/5w1tchy/books-api/internal/validate"
+	storebooks "github.com/5w1tchy/books-api/internal/store/books"
 )
 
-func handleGet(db *sql.DB, w http.ResponseWriter, r *http.Request, key string) {
-	w.Header().Set("Content-Type", "application/json")
-
-	pb, err := booksrepo.FetchByKey(r.Context(), db, key)
-	if err != nil {
-		if errors.Is(err, booksrepo.ErrNotFound) {
-			apperr.WriteStatus(w, r, http.StatusNotFound, "Not Found", "Book not found")
+func get(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		apperr.WriteStatus(w, r, http.StatusInternalServerError, "DB error", "Failed to fetch book")
-		return
-	}
+		w.Header().Set("Content-Type", "application/json")
 
-	keep := validate.ParseFields(r.URL.Query().Get("fields"), []string{"summary", "short", "coda"})
-	if _, ok := keep["summary"]; !ok {
-		pb.Summary = ""
-	}
-	if _, ok := keep["short"]; !ok {
-		pb.Short = ""
-	}
-	if _, ok := keep["coda"]; !ok {
-		pb.Coda = ""
-	}
+		key := r.PathValue("key")
+		if key == "" {
+			http.Error(w, `{"status":"error","error":"missing key"}`, http.StatusBadRequest)
+			return
+		}
 
-	_ = json.NewEncoder(w).Encode(map[string]any{"status": "success", "data": pb})
+		b, err := storebooks.FetchByKey(r.Context(), db, key)
+		if err == sql.ErrNoRows {
+			http.Error(w, `{"status":"error","error":"not found"}`, http.StatusNotFound)
+			return
+		} else if err != nil {
+			http.Error(w, `{"status":"error","error":"failed to fetch"}`, http.StatusInternalServerError)
+			return
+		}
+
+		resp := struct {
+			Status string                `json:"status"`
+			Data   storebooks.PublicBook `json:"data"`
+		}{"success", b}
+		_ = json.NewEncoder(w).Encode(resp)
+	}
 }

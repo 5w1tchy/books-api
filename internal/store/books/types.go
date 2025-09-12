@@ -1,6 +1,5 @@
-package booksrepo
+package books
 
-// PublicBook mirrors your handler type; keep fields aligned.
 type PublicBook struct {
 	ID            string   `json:"id"`
 	ShortID       int      `json:"short_id"`

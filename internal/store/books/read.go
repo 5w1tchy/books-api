@@ -1,18 +1,20 @@
-package booksrepo
+package books
 
 import (
 	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
+
+	"github.com/5w1tchy/books-api/internal/store/shared"
 )
 
-func FetchByKey(ctx context.Context, db *sql.DB, key string) (PublicBook, error) {
-	cond, arg := resolveBookKeyCondArg(key)
+func fetchByKey(ctx context.Context, db *sql.DB, key string) (PublicBook, error) {
+	cond, arg := shared.ResolveBookKeyCondArg(ctx, key)
 	q := `
 	SELECT
 		b.id, b.short_id, b.slug, b.title, a.name,
-		COALESCE(json_agg(c.slug) FILTER (WHERE c.slug IS NOT NULL), '[]'),
+		COALESCE(json_agg(DISTINCT c.slug) FILTER (WHERE c.slug IS NOT NULL), '[]'),
 		COALESCE(bo.summary, ''), COALESCE(bo.short, ''), COALESCE(bo.coda, '')
 	FROM books b
 	JOIN authors a               ON a.id = b.author_id
@@ -27,7 +29,7 @@ func FetchByKey(ctx context.Context, db *sql.DB, key string) (PublicBook, error)
 	if err := db.QueryRowContext(ctx, q, arg).
 		Scan(&pb.ID, &pb.ShortID, &pb.Slug, &pb.Title, &pb.Author, &slugsJSON, &pb.Summary, &pb.Short, &pb.Coda); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return PublicBook{}, ErrNotFound
+			return PublicBook{}, sql.ErrNoRows
 		}
 		return PublicBook{}, err
 	}
@@ -36,11 +38,9 @@ func FetchByKey(ctx context.Context, db *sql.DB, key string) (PublicBook, error)
 	return pb, nil
 }
 
-func ExistsByKey(ctx context.Context, db *sql.DB, key string) (bool, error) {
-	cond, arg := resolveBookKeyCondArg(key)
+func existsByKey(ctx context.Context, db *sql.DB, key string) (bool, error) {
+	cond, arg := shared.ResolveBookKeyCondArg(ctx, key)
 	var exists bool
-	err := db.QueryRowContext(ctx,
-		`SELECT EXISTS (SELECT 1 FROM books b WHERE `+cond+`)`, arg).
-		Scan(&exists)
+	err := db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM books b WHERE `+cond+`)`, arg).Scan(&exists)
 	return exists, err
 }

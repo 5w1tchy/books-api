@@ -1,4 +1,4 @@
-package booksrepo
+package books
 
 import (
 	"context"
@@ -8,16 +8,20 @@ import (
 	"strings"
 )
 
+// List returns page of books (same filters/behavior as before) and total count.
 func List(ctx context.Context, db *sql.DB, f ListFilters) ([]PublicBook, int, error) {
 	where := []string{}
 	args := []any{}
 	i := 1
 
+	// author filter
 	if f.Author != "" {
 		where = append(where, "a.slug = $"+strconv.Itoa(i))
 		args = append(args, f.Author)
 		i++
 	}
+
+	// categories filter (any|all)
 	if n := len(f.Categories); n > 0 {
 		if f.Match != "all" {
 			where = append(where, `
@@ -39,6 +43,8 @@ EXISTS (
 		args = append(args, f.Categories)
 		i++
 	}
+
+	// q/min_sim filter (LIKE + pg_trgm similarity)
 	qIdx, minIdx := -1, -1
 	if f.Q != "" {
 		qIdx = i
@@ -57,6 +63,7 @@ EXISTS (
 )`)
 	}
 
+	// total count
 	qCount := `
 SELECT COUNT(*)
 FROM books b
@@ -65,12 +72,12 @@ JOIN authors a ON a.id = b.author_id
 	if len(where) > 0 {
 		qCount += "WHERE " + strings.Join(where, " AND ") + "\n"
 	}
-
 	var total int
 	if err := db.QueryRowContext(ctx, qCount, args...).Scan(&total); err != nil {
 		return nil, 0, err
 	}
 
+	// page rows
 	qRows := `
 SELECT
   b.id, b.short_id, b.slug, b.title, a.name,
@@ -86,6 +93,7 @@ LEFT JOIN categories c_all    ON c_all.id = bc1.category_id
 	qRows += `
 GROUP BY b.id, b.short_id, b.slug, b.title, a.name
 `
+	// ranking when q present; else recency
 	if qIdx != -1 {
 		qRows += `
 ORDER BY GREATEST(
@@ -96,6 +104,7 @@ ORDER BY GREATEST(
 	} else {
 		qRows += "ORDER BY b.created_at DESC\n"
 	}
+	// limit/offset
 	qRows += "LIMIT $" + strconv.Itoa(i) + " OFFSET $" + strconv.Itoa(i+1)
 
 	rows, err := db.QueryContext(ctx, qRows, append(args, f.Limit, f.Offset)...)
@@ -115,5 +124,5 @@ ORDER BY GREATEST(
 		pb.URL = "/books/" + pb.Slug
 		out = append(out, pb)
 	}
-	return out, total, nil
+	return out, total, rows.Err()
 }

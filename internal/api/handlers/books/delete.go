@@ -2,27 +2,32 @@ package books
 
 import (
 	"database/sql"
-	"errors"
 	"net/http"
 
-	"github.com/5w1tchy/books-api/internal/api/apperr"
-	"github.com/5w1tchy/books-api/internal/repo/booksrepo"
+	storebooks "github.com/5w1tchy/books-api/internal/store/books"
 )
 
-func handleDelete(db *sql.DB, w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("key")
-	if id == "" || !isUUID(id) {
-		apperr.WriteStatus(w, r, http.StatusBadRequest, "Bad Request", "id must be a UUID")
-		return
-	}
-
-	if err := booksrepo.Delete(r.Context(), db, id); err != nil {
-		if errors.Is(err, booksrepo.ErrNotFound) {
-			apperr.WriteStatus(w, r, http.StatusNotFound, "Not Found", "Book not found")
+func del(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		apperr.WriteStatus(w, r, http.StatusInternalServerError, "DB error", "delete failed")
-		return
+		key := r.PathValue("key")
+		if key == "" {
+			http.Error(w, `{"status":"error","error":"missing key"}`, http.StatusBadRequest)
+			return
+		}
+
+		if err := storebooks.Delete(r.Context(), db, key); err == sql.ErrNoRows {
+			http.Error(w, `{"status":"error","error":"not found"}`, http.StatusNotFound)
+			return
+		} else if err != nil {
+			http.Error(w, `{"status":"error","error":"failed to delete"}`, http.StatusInternalServerError)
+			return
+		}
+
+		// No response body on successful delete.
+		w.WriteHeader(http.StatusNoContent)
 	}
-	w.WriteHeader(http.StatusNoContent)
 }
