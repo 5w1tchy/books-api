@@ -100,4 +100,3 @@ func main() {
 	fmt.Println("Server (local) listening on port:", port, "(HTTPS)")
 	log.Fatal(server.ListenAndServeTLS(cert, key))
 }
-
