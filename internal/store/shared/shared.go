@@ -7,41 +7,82 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode"
+
+	"golang.org/x/text/transform"
+	"golang.org/x/text/unicode/norm"
 )
 
 var (
-	slugRe = regexp.MustCompile(`[^a-z0-9-]+`)
 	uuidRe = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 )
 
-// Slugify lowercases, trims, replaces spaces/underscores with '-', strips non [a-z0-9-], and de-dupes '-'s.
+// Slugify builds a stable ASCII-ish slug: [a-z0-9] with single '-' separators.
+// It never drops the first character of a word and never leaves leading '-'.
 func Slugify(s string) string {
-	s = strings.TrimSpace(strings.ToLower(s))
-	s = strings.NewReplacer(" ", "-", "_", "-").Replace(s)
-	s = slugRe.ReplaceAllString(s, "")
-	s = strings.Trim(s, "-")
-	for strings.Contains(s, "--") {
-		s = strings.ReplaceAll(s, "--", "-")
-	}
+	s = strings.TrimSpace(s)
 	if s == "" {
 		return "n-a"
 	}
-	return s
+
+	// Normalize and strip combining marks (accent folding)
+	t := transform.Chain(
+		norm.NFKD,
+		transform.RemoveFunc(func(r rune) bool { return unicode.Is(unicode.Mn, r) }),
+		norm.NFC,
+	)
+	normed, _, _ := transform.String(t, s)
+
+	var b strings.Builder
+	b.Grow(len(normed))
+	prevDash := false
+
+	for _, r := range normed {
+		// lowercase ASCII fast path
+		if r >= 'A' && r <= 'Z' {
+			r += 'a' - 'A'
+		}
+
+		switch {
+		case (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9'):
+			b.WriteRune(r)
+			prevDash = false
+		case r == ' ' || r == '_' || r == '-' || unicode.IsSpace(r):
+			if !prevDash && b.Len() > 0 {
+				b.WriteByte('-')
+				prevDash = true
+			}
+		case r == '\'' || r == '’':
+			// drop apostrophes entirely (no hyphen)
+		default:
+			// drop other punctuation/symbols
+		}
+	}
+
+	out := strings.Trim(b.String(), "-")
+	if out == "" {
+		return "n-a"
+	}
+	for strings.Contains(out, "--") { // safety
+		out = strings.ReplaceAll(out, "--", "-")
+	}
+	return out
 }
 
+// DedupSlugs normalizes via Slugify and deduplicates.
 func DedupSlugs(in []string) []string {
 	seen := make(map[string]struct{}, len(in))
 	out := make([]string, 0, len(in))
 	for _, s := range in {
-		s = strings.TrimSpace(strings.ToLower(s))
-		if s == "" {
+		slug := Slugify(s)
+		if slug == "" {
 			continue
 		}
-		if _, ok := seen[s]; ok {
+		if _, ok := seen[slug]; ok {
 			continue
 		}
-		seen[s] = struct{}{}
-		out = append(out, s)
+		seen[slug] = struct{}{}
+		out = append(out, slug)
 	}
 	return out
 }

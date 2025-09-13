@@ -11,6 +11,7 @@ import (
 
 	mw "github.com/5w1tchy/books-api/internal/api/middlewares"
 	"github.com/5w1tchy/books-api/internal/api/router"
+	"github.com/5w1tchy/books-api/internal/metrics/viewqueue"
 	"github.com/5w1tchy/books-api/internal/repository/sqlconnect"
 	"github.com/5w1tchy/books-api/pkg/utils"
 	"github.com/joho/godotenv"
@@ -25,6 +26,11 @@ func main() {
 		log.Fatalf("failed to connect to database: %v", err)
 	}
 	defer db.Close()
+
+	// --- start bounded view queue (2 workers, buffer 10k) ---
+	viewqueue.Start(db, 10000, 2)
+	defer viewqueue.Shutdown()
+	// --------------------------------------------------------
 
 	// -------- Redis ----------
 	var rdb *redis.Client
