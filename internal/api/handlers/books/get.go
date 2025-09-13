@@ -31,7 +31,7 @@ func get(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// Load the public book (existing logic)
+		// Load the public book
 		b, err := storebooks.FetchByKey(r.Context(), db, key)
 		if err == sql.ErrNoRows {
 			http.Error(w, `{"status":"error","error":"not found"}`, http.StatusNotFound)
@@ -41,13 +41,33 @@ func get(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// Record a view (bounded worker; non-blocking)
+		// Record a view (non-blocking)
 		if b.ID != "" {
 			viewqueue.Enqueue(b.ID)
 		}
 
-		// Fetch long-form content (summary + coda), but NOT short
-		summary, coda, _ := fetchContentByID(r.Context(), db, b.ID)
+		// We do NOT want short on the book page
+		b.Short = ""
+
+		// Prefer summary/coda from store; fallback to content fetch if missing
+		var sumPtr, codaPtr *string
+		if b.Summary != "" {
+			s := b.Summary
+			sumPtr = &s
+		}
+		if b.Coda != "" {
+			c := b.Coda
+			codaPtr = &c
+		}
+		if sumPtr == nil || codaPtr == nil {
+			fs, fc, _ := fetchContentByID(r.Context(), db, b.ID)
+			if sumPtr == nil {
+				sumPtr = fs
+			}
+			if codaPtr == nil {
+				codaPtr = fc
+			}
+		}
 
 		resp := struct {
 			Status string          `json:"status"`
@@ -56,33 +76,38 @@ func get(db *sql.DB) http.HandlerFunc {
 			Status: "success",
 			Data: bookWithContent{
 				PublicBook: b,
-				Summary:    summary,
-				Coda:       coda,
+				Summary:    sumPtr,
+				Coda:       codaPtr,
 			},
 		}
 		_ = json.NewEncoder(w).Encode(resp)
 	}
 }
 
-// fetchContentByID gets summary & coda from books table by UUID (best-effort).
+// fetchContentByID gets latest summary & coda from book_outputs by book_id (best-effort).
 func fetchContentByID(ctx context.Context, db *sql.DB, id string) (*string, *string, error) {
 	if id == "" {
 		return nil, nil, nil
 	}
+
 	type row struct {
 		summary sql.NullString
 		coda    sql.NullString
 	}
-	var r row
 
+	var r row
 	cctx, cancel := context.WithTimeout(ctx, 800*time.Millisecond)
 	defer cancel()
 
-	err := db.QueryRowContext(cctx,
-		`SELECT summary, coda FROM books WHERE id = $1`, id,
-	).Scan(&r.summary, &r.coda)
+	err := db.QueryRowContext(cctx, `
+		SELECT o.summary, o.coda
+		FROM book_outputs o
+		WHERE o.book_id = $1
+		ORDER BY o.created_at DESC
+		LIMIT 1
+	`, id).Scan(&r.summary, &r.coda)
 	if err != nil {
-		// If not found or columns absent, just return nils (don’t break the endpoint)
+		// If not found, just return nils (don’t break the endpoint)
 		return nil, nil, nil
 	}
 

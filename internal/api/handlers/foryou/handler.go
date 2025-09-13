@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -55,7 +56,7 @@ func Handler(db *sql.DB, rdb *redis.Client) http.Handler {
 		fields := strings.TrimSpace(r.URL.Query().Get("fields"))
 		limit := parseLimit(r.URL.Query().Get("limit"), 8)
 
-		want := wanted(fields) // map[string]bool
+		want := wanted(fields)
 
 		resp := ForYouResponse{
 			Status: "success",
@@ -69,40 +70,40 @@ func Handler(db *sql.DB, rdb *redis.Client) http.Handler {
 			},
 		}
 
-		// shorts (from books.short; non-empty only)
 		if want["shorts"] {
 			items, err := fetchShorts(ctx, db, limit)
 			if err != nil {
+				log.Printf("[for-you] fetchShorts error: %v", err)
 				http.Error(w, "internal server error", http.StatusInternalServerError)
 				return
 			}
 			resp.Data.Shorts = items
 		}
 
-		// trending (views in last 7 days via book_view_events)
 		if want["trending"] {
 			items, err := fetchTrending(ctx, db, limit)
 			if err != nil {
+				log.Printf("[for-you] fetchTrending error: %v", err)
 				http.Error(w, "internal server error", http.StatusInternalServerError)
 				return
 			}
 			resp.Data.Trending = items
 		}
 
-		// new (recent by created_at desc)
 		if want["new"] {
 			items, err := fetchNew(ctx, db, limit)
 			if err != nil {
+				log.Printf("[for-you] fetchNew error: %v", err)
 				http.Error(w, "internal server error", http.StatusInternalServerError)
 				return
 			}
 			resp.Data.New = items
 		}
 
-		// most_viewed (all-time via book_view_events)
 		if want["most_viewed"] {
 			items, err := fetchMostViewed(ctx, db, limit)
 			if err != nil {
+				log.Printf("[for-you] fetchMostViewed error: %v", err)
 				http.Error(w, "internal server error", http.StatusInternalServerError)
 				return
 			}
@@ -126,7 +127,6 @@ func parseLimit(s string, def int) int {
 }
 
 func wanted(fieldsCSV string) map[string]bool {
-	// default = all 4 blocks if fields not provided
 	m := map[string]bool{
 		"shorts":      true,
 		"trending":    true,
@@ -150,12 +150,19 @@ func wanted(fieldsCSV string) map[string]bool {
 
 // ---- queries ----
 
+// from book_outputs.short joined to books; COALESCE all string columns
 func fetchShorts(ctx context.Context, db *sql.DB, limit int) ([]ShortItem, error) {
 	const q = `
-		SELECT id, COALESCE(slug, '') AS slug, title, author, short
-		FROM books
-		WHERE short IS NOT NULL AND length(trim(short)) > 0
-		ORDER BY title ASC
+		SELECT
+			b.id,
+			COALESCE(b.slug,'')   AS slug,
+			COALESCE(b.title,'')  AS title,
+			COALESCE(b.author,'') AS author,
+			bo.short
+		FROM book_outputs bo
+		JOIN books b ON b.id = bo.book_id
+		WHERE bo.short IS NOT NULL AND length(trim(bo.short)) > 0
+		ORDER BY bo.created_at DESC
 		LIMIT $1
 	`
 	rows, err := db.QueryContext(ctx, q, limit)
@@ -186,7 +193,11 @@ func fetchShorts(ctx context.Context, db *sql.DB, limit int) ([]ShortItem, error
 
 func fetchTrending(ctx context.Context, db *sql.DB, limit int) ([]BookLite, error) {
 	const q = `
-		SELECT b.id, COALESCE(b.slug,'') AS slug, b.title, b.author
+		SELECT
+			b.id,
+			COALESCE(b.slug,'')   AS slug,
+			COALESCE(b.title,'')  AS title,
+			COALESCE(b.author,'') AS author
 		FROM books b
 		JOIN (
 			SELECT book_id, COUNT(*) AS views_7d
@@ -202,7 +213,11 @@ func fetchTrending(ctx context.Context, db *sql.DB, limit int) ([]BookLite, erro
 
 func fetchMostViewed(ctx context.Context, db *sql.DB, limit int) ([]BookLite, error) {
 	const q = `
-		SELECT b.id, COALESCE(b.slug,'') AS slug, b.title, b.author
+		SELECT
+			b.id,
+			COALESCE(b.slug,'')   AS slug,
+			COALESCE(b.title,'')  AS title,
+			COALESCE(b.author,'') AS author
 		FROM books b
 		JOIN (
 			SELECT book_id, COUNT(*) AS views
@@ -217,7 +232,11 @@ func fetchMostViewed(ctx context.Context, db *sql.DB, limit int) ([]BookLite, er
 
 func fetchNew(ctx context.Context, db *sql.DB, limit int) ([]BookLite, error) {
 	const q = `
-		SELECT id, COALESCE(slug,'') AS slug, title, author
+		SELECT
+			id,
+			COALESCE(slug,'')   AS slug,
+			COALESCE(title,'')  AS title,
+			COALESCE(author,'') AS author
 		FROM books
 		ORDER BY created_at DESC
 		LIMIT $1
