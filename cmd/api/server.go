@@ -11,6 +11,7 @@ import (
 
 	mw "github.com/5w1tchy/books-api/internal/api/middlewares"
 	"github.com/5w1tchy/books-api/internal/api/router"
+	"github.com/5w1tchy/books-api/internal/maintenance"
 	"github.com/5w1tchy/books-api/internal/metrics/viewqueue"
 	"github.com/5w1tchy/books-api/internal/repository/sqlconnect"
 	"github.com/5w1tchy/books-api/pkg/utils"
@@ -64,10 +65,17 @@ func main() {
 			TLSConfig:    &tls.Config{MinVersion: tls.VersionTLS12},
 		})
 	}
+	defer rdb.Close()
 
 	if err := rdb.Ping(context.Background()).Err(); err != nil {
 		log.Fatalf("Redis connection failed: %v", err)
 	}
+
+	// -------- Daily retention job for book_outputs (keep latest 5) ----------
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	maintenance.StartBookOutputsRetention(ctx, db, 5, "03:00", "Asia/Tbilisi")
+	// -----------------------------------------------------------------------
 
 	// -------- Rate limiting: token-bucket only ----------
 	tb := mw.NewRedisTokenBucket(rdb, 5, 20, mw.PerIPKey("tb"))

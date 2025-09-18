@@ -1,4 +1,3 @@
-// internal/store/foryou/build.go
 package foryou
 
 import (
@@ -25,10 +24,11 @@ const (
 	featureCooldown = 90 * 24 * time.Hour
 )
 
-var debugForYou = os.Getenv("FOR_YOU_DEBUG") == "1"
+// -------- debug helpers (runtime-checked) --------
+func debugEnabled() bool { return os.Getenv("FOR_YOU_DEBUG") == "1" }
 
 func dbg(format string, args ...any) {
-	if debugForYou {
+	if debugEnabled() {
 		log.Printf("[for-you] "+format, args...)
 	}
 }
@@ -37,6 +37,8 @@ func errf(where string, err error) error {
 	log.Printf("[for-you][ERROR] %s: %v", where, err)
 	return fmt.Errorf("%s: %w", where, err)
 }
+
+// ----------------- public entry ------------------
 
 func Build(ctx context.Context, db *sql.DB, rdb *redis.Client, lim Limits, f Fields) (Sections, error) {
 	tz := mustTZ(productTZName)
@@ -70,15 +72,21 @@ func Build(ctx context.Context, db *sql.DB, rdb *redis.Client, lim Limits, f Fie
 	kNew := fmt.Sprintf("new:%s:f=%s:n=%d", day, fieldsKey, lim.New)
 
 	var (
-		shorts   []ShortItem
-		trending []BookLite
-		newest   []BookLite
+		shorts    []ShortItem
+		recs      []BookLite
+		trending  []BookLite
+		newest    []BookLite
+		hitShorts bool
+		hitRecs   bool
+		hitTrend  bool
+		hitNew    bool
 	)
 
 	// --------- FAST PATH: cache pulls ----------
-	// Shorts (own probe so we don't disturb existing mget path)
-	if hitS, okS := c.mget(ctx, kShorts); okS && len(hitS) == 1 && hitS[0] != nil {
-		if err := json.Unmarshal(hitS[0], &shorts); err == nil {
+	// shorts
+	if hit, ok := c.mget(ctx, kShorts); ok && len(hit) == 1 && hit[0] != nil {
+		if err := json.Unmarshal(hit[0], &shorts); err == nil {
+			hitShorts = true
 			dbg("cache hit: shorts (%d items)", len(shorts))
 		} else {
 			errf("cache unmarshal shorts failed", err)
@@ -86,36 +94,38 @@ func Build(ctx context.Context, db *sql.DB, rdb *redis.Client, lim Limits, f Fie
 		}
 	}
 
-	// Trending + New (existing mget)
-	hits, ok := c.mget(ctx, kTrending, kNew)
-	if ok && hits != nil {
+	// trending + new
+	if hits, ok := c.mget(ctx, kTrending, kNew); ok && hits != nil {
 		if hits[0] != nil {
-			if err := json.Unmarshal(hits[0], &trending); err != nil {
+			if err := json.Unmarshal(hits[0], &trending); err == nil {
+				hitTrend = true
+				dbg("cache hit: trending (%d items)", len(trending))
+			} else {
 				errf("cache unmarshal trending failed", err)
 				trending = nil
-			} else {
-				dbg("cache hit: trending (%d items)", len(trending))
 			}
 		}
 		if hits[1] != nil {
-			if err := json.Unmarshal(hits[1], &newest); err != nil {
+			if err := json.Unmarshal(hits[1], &newest); err == nil {
+				hitNew = true
+				dbg("cache hit: new (%d items)", len(newest))
+			} else {
 				errf("cache unmarshal new failed", err)
 				newest = nil
-			} else {
-				dbg("cache hit: new (%d items)", len(newest))
 			}
 		}
 	}
 
-	// Staging map for 2h TTL
+	// Staging map for 2h TTL sets
 	toCache2h := make(map[string][]byte)
 
 	// Deterministic daily seed
 	seed := dailySeed(today)
 	rng := rand.New(rand.NewSource(int64(seed)))
 
-	// ------------------ SHORTS (timeout + cache 2h) ------------------
+	// ------------------ SHORTS (timeout + cache) ------------------
 	if shorts == nil {
+		dbg("cache miss: shorts -> computing")
 		ctxS, cancel := context.WithTimeout(ctx, blockTO)
 		defer cancel()
 
@@ -129,14 +139,13 @@ func Build(ctx context.Context, db *sql.DB, rdb *redis.Client, lim Limits, f Fie
 			shorts = []ShortItem{}
 		} else {
 			shorts = s
-			if b, err := json.Marshal(shorts); err == nil {
-				toCache2h[c.key(kShorts)] = b
-			}
+		}
+		if b, err := json.Marshal(shorts); err == nil {
+			toCache2h[c.key(kShorts)] = b
 		}
 	}
 
 	// ------------------ RECS (timeout + cache by shorts signature) ------------------
-	var recs []BookLite
 	{
 		ids := make([]string, 0, len(shorts))
 		for _, s := range shorts {
@@ -150,6 +159,7 @@ func Build(ctx context.Context, db *sql.DB, rdb *redis.Client, lim Limits, f Fie
 		// Try cache
 		if hit, ok2 := c.mget(ctx, kRecs); ok2 && len(hit) == 1 && hit[0] != nil {
 			if err := json.Unmarshal(hit[0], &recs); err == nil {
+				hitRecs = true
 				dbg("cache hit: recs (%d items)", len(recs))
 			} else {
 				errf("cache unmarshal recs failed", err)
@@ -159,6 +169,7 @@ func Build(ctx context.Context, db *sql.DB, rdb *redis.Client, lim Limits, f Fie
 
 		// Build if miss
 		if recs == nil {
+			dbg("cache miss: recs -> computing")
 			ctxR, cancel := context.WithTimeout(ctx, blockTO)
 			defer cancel()
 
@@ -181,6 +192,7 @@ func Build(ctx context.Context, db *sql.DB, rdb *redis.Client, lim Limits, f Fie
 
 	// ------------------ TRENDING (timeout + cache 2h) ------------------
 	if trending == nil {
+		dbg("cache miss: trending -> computing")
 		ctxT, cancel := context.WithTimeout(ctx, blockTO)
 		defer cancel()
 
@@ -202,6 +214,7 @@ func Build(ctx context.Context, db *sql.DB, rdb *redis.Client, lim Limits, f Fie
 
 	// ------------------ NEW (timeout + cache 2h) ------------------
 	if newest == nil {
+		dbg("cache miss: new -> computing")
 		ctxN, cancel := context.WithTimeout(ctx, blockTO)
 		defer cancel()
 
@@ -232,6 +245,8 @@ func Build(ctx context.Context, db *sql.DB, rdb *redis.Client, lim Limits, f Fie
 		New:             newest,
 		ContinueReading: []BookLite{},
 	}
+
+	dbg("cache summary: shorts=%t recs=%t trending=%t new=%t", hitShorts, hitRecs, hitTrend, hitNew)
 	return sec, nil
 }
 
@@ -343,12 +358,24 @@ LIMIT $1;`
 			}
 		}
 
-		// mark today's picks
+		// mark today's picks (update ONLY latest book_outputs row per book_id)
 		if len(picks) > 0 {
 			if tx, err := db.BeginTx(ctx, nil); err == nil {
 				ok := true
 				for _, p := range picks {
-					if _, err2 := tx.ExecContext(ctx, `UPDATE book_outputs SET short_last_featured_at = $1 WHERE book_id = $2`, today, p.ID); err2 != nil {
+					_, err2 := tx.ExecContext(ctx, `
+UPDATE book_outputs bo
+SET short_last_featured_at = $1
+FROM (
+  SELECT id
+  FROM book_outputs
+  WHERE book_id = $2
+  ORDER BY created_at DESC
+  LIMIT 1
+) latest
+WHERE bo.id = latest.id
+`, today, p.ID)
+					if err2 != nil {
 						_ = tx.Rollback()
 						ok = false
 						break
