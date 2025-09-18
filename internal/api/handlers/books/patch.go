@@ -3,9 +3,12 @@ package books
 import (
 	"database/sql"
 	"encoding/json"
+	"log"
 	"net/http"
 
 	storebooks "github.com/5w1tchy/books-api/internal/store/books"
+	storeforyou "github.com/5w1tchy/books-api/internal/store/foryou"
+	"github.com/redis/go-redis/v9"
 )
 
 type patchReq struct {
@@ -14,7 +17,7 @@ type patchReq struct {
 	CategorySlugs *[]string `json:"categories,omitempty"`
 }
 
-func patch(db *sql.DB) http.HandlerFunc {
+func patch(db *sql.DB, rdb *redis.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPatch {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -46,6 +49,11 @@ func patch(db *sql.DB) http.HandlerFunc {
 		} else if err != nil {
 			http.Error(w, `{"status":"error","error":"failed to patch"}`, http.StatusInternalServerError)
 			return
+		}
+
+		// Invalidate /for-you cache generation (best-effort).
+		if err := storeforyou.BumpVersion(r.Context(), rdb); err != nil {
+			log.Printf("[for-you] bump version failed: %v", err)
 		}
 
 		resp := struct {

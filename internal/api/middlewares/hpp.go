@@ -73,7 +73,7 @@ func DefaultHPPOptions() HPPOptions {
 		CheckBodyOnlyForContentType: "application/x-www-form-urlencoded",
 		Whitelist: []string{
 			"id", "user_id", "book_id", "chapter", "page",
-			"limit", "offset",
+			"limit", "offset", "fields",
 			"lang", "search", "q",
 			"category", "categories", "tags",
 			"title", "author", "min_sim",

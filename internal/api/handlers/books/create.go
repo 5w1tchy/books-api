@@ -3,10 +3,13 @@ package books
 import (
 	"database/sql"
 	"encoding/json"
+	"log"
 	"net/http"
 	"strings"
 
 	storebooks "github.com/5w1tchy/books-api/internal/store/books"
+	storeforyou "github.com/5w1tchy/books-api/internal/store/foryou"
+	"github.com/redis/go-redis/v9"
 )
 
 type createReq struct {
@@ -15,7 +18,7 @@ type createReq struct {
 	CategorySlugs []string `json:"categories,omitempty"`
 }
 
-func create(db *sql.DB) http.HandlerFunc {
+func create(db *sql.DB, rdb *redis.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -47,6 +50,11 @@ func create(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
+		// Best-effort global cache bust for /for-you
+		if err := storeforyou.BumpVersion(r.Context(), rdb); err != nil {
+			log.Printf("[for-you] bump version failed: %v", err)
+		}
+
 		resp := struct {
 			Status string                `json:"status"`
 			Data   storebooks.PublicBook `json:"data"`
@@ -54,7 +62,6 @@ func create(db *sql.DB) http.HandlerFunc {
 			Status: "success",
 			Data:   book,
 		}
-		enc := json.NewEncoder(w)
-		_ = enc.Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}
 }

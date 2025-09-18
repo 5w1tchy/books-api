@@ -3,10 +3,13 @@ package books
 import (
 	"database/sql"
 	"encoding/json"
+	"log"
 	"net/http"
 	"strings"
 
 	storebooks "github.com/5w1tchy/books-api/internal/store/books"
+	storeforyou "github.com/5w1tchy/books-api/internal/store/foryou"
+	"github.com/redis/go-redis/v9"
 )
 
 type replaceReq struct {
@@ -15,7 +18,7 @@ type replaceReq struct {
 	CategorySlugs []string `json:"categories,omitempty"`
 }
 
-func put(db *sql.DB) http.HandlerFunc {
+func put(db *sql.DB, rdb *redis.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPut {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -54,6 +57,11 @@ func put(db *sql.DB) http.HandlerFunc {
 		} else if err != nil {
 			http.Error(w, `{"status":"error","error":"failed to replace"}`, http.StatusInternalServerError)
 			return
+		}
+
+		// Invalidate /for-you cache generation (best-effort).
+		if err := storeforyou.BumpVersion(r.Context(), rdb); err != nil {
+			log.Printf("[for-you] bump version failed: %v", err)
 		}
 
 		resp := struct {

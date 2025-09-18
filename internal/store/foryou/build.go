@@ -1,3 +1,4 @@
+// internal/store/foryou/build.go
 package foryou
 
 import (
@@ -5,9 +6,15 @@ import (
 	"crypto/sha1"
 	"database/sql"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log"
 	"math/rand"
+	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -15,9 +22,21 @@ import (
 
 const (
 	productTZName   = "Asia/Tbilisi"
-	feedCacheTTL    = 2 * time.Hour
 	featureCooldown = 90 * 24 * time.Hour
 )
+
+var debugForYou = os.Getenv("FOR_YOU_DEBUG") == "1"
+
+func dbg(format string, args ...any) {
+	if debugForYou {
+		log.Printf("[for-you] "+format, args...)
+	}
+}
+
+func errf(where string, err error) error {
+	log.Printf("[for-you][ERROR] %s: %v", where, err)
+	return fmt.Errorf("%s: %w", where, err)
+}
 
 func Build(ctx context.Context, db *sql.DB, rdb *redis.Client, lim Limits, f Fields) (Sections, error) {
 	tz := mustTZ(productTZName)
@@ -30,62 +49,188 @@ func Build(ctx context.Context, db *sql.DB, rdb *redis.Client, lim Limits, f Fie
 		fieldsKey = "lite"
 	} else if f.IncludeSummary {
 		fieldsKey = "summary"
+	} else {
+		fieldsKey = "full"
 	}
 
-	cacheKey := fmt.Sprintf("for_you:%s:s=%d:r=%d:t=%d:n=%d:f=%s",
-		today.Format("2006-01-02"), lim.Shorts, lim.Recs, lim.Trending, lim.New, fieldsKey)
+	// Per-block timeout (env-tunable; default 450ms)
+	blockTO := 450 * time.Millisecond
+	if v := os.Getenv("FOR_YOU_BLOCK_TIMEOUT_MS"); v != "" {
+		if ms, err := strconv.Atoi(v); err == nil && ms > 0 {
+			blockTO = time.Duration(ms) * time.Millisecond
+		}
+	}
 
-	// try cache
-	if rdb != nil {
-		if b, err := rdb.Get(ctx, cacheKey).Bytes(); err == nil && len(b) > 0 {
-			var sec Sections
-			if json.Unmarshal(b, &sec) == nil {
-				return sec, nil
+	// Request-scoped cache (no PING, single-warn on error)
+	c := newCache(rdb)
+
+	day := today.Format("2006-01-02")
+	kShorts := fmt.Sprintf("shorts:%s:f=%s:s=%d", day, fieldsKey, lim.Shorts)
+	kTrending := fmt.Sprintf("trending:%s:f=%s:t=%d", day, fieldsKey, lim.Trending)
+	kNew := fmt.Sprintf("new:%s:f=%s:n=%d", day, fieldsKey, lim.New)
+
+	var (
+		shorts   []ShortItem
+		trending []BookLite
+		newest   []BookLite
+	)
+
+	// --------- FAST PATH: cache pulls ----------
+	// Shorts (own probe so we don't disturb existing mget path)
+	if hitS, okS := c.mget(ctx, kShorts); okS && len(hitS) == 1 && hitS[0] != nil {
+		if err := json.Unmarshal(hitS[0], &shorts); err == nil {
+			dbg("cache hit: shorts (%d items)", len(shorts))
+		} else {
+			errf("cache unmarshal shorts failed", err)
+			shorts = nil
+		}
+	}
+
+	// Trending + New (existing mget)
+	hits, ok := c.mget(ctx, kTrending, kNew)
+	if ok && hits != nil {
+		if hits[0] != nil {
+			if err := json.Unmarshal(hits[0], &trending); err != nil {
+				errf("cache unmarshal trending failed", err)
+				trending = nil
+			} else {
+				dbg("cache hit: trending (%d items)", len(trending))
+			}
+		}
+		if hits[1] != nil {
+			if err := json.Unmarshal(hits[1], &newest); err != nil {
+				errf("cache unmarshal new failed", err)
+				newest = nil
+			} else {
+				dbg("cache hit: new (%d items)", len(newest))
 			}
 		}
 	}
 
+	// Staging map for 2h TTL
+	toCache2h := make(map[string][]byte)
+
+	// Deterministic daily seed
 	seed := dailySeed(today)
 	rng := rand.New(rand.NewSource(int64(seed)))
 
-	shorts, err := pickShorts(ctx, db, lim.Shorts, today, tomorrow, rng)
-	if err != nil {
-		return Sections{}, fmt.Errorf("pickShorts: %w", err)
-	}
-	recs, err := pickRecs(ctx, db, lim.Recs, shorts, rng, f)
-	if err != nil {
-		return Sections{}, fmt.Errorf("pickRecs: %w", err)
-	}
-	if recs == nil {
-		recs = make([]BookLite, 0)
-	}
-	trending, err := pickTrending(ctx, db, lim.Trending, f)
-	if err != nil {
-		return Sections{}, fmt.Errorf("pickTrending: %w", err)
-	}
-	if trending == nil {
-		trending = make([]BookLite, 0)
-	}
-	newest, err := pickNewest(ctx, db, lim.New, f)
-	if err != nil {
-		return Sections{}, fmt.Errorf("pickNewest: %w", err)
-	}
-	if newest == nil {
-		newest = make([]BookLite, 0)
+	// ------------------ SHORTS (timeout + cache 2h) ------------------
+	if shorts == nil {
+		ctxS, cancel := context.WithTimeout(ctx, blockTO)
+		defer cancel()
+
+		s, err := pickShorts(ctxS, db, lim.Shorts, today, tomorrow, rng)
+		if err != nil {
+			if !errors.Is(err, sql.ErrNoRows) {
+				errf("shorts", err)
+			}
+			shorts = []ShortItem{}
+		} else if s == nil {
+			shorts = []ShortItem{}
+		} else {
+			shorts = s
+			if b, err := json.Marshal(shorts); err == nil {
+				toCache2h[c.key(kShorts)] = b
+			}
+		}
 	}
 
+	// ------------------ RECS (timeout + cache by shorts signature) ------------------
+	var recs []BookLite
+	{
+		ids := make([]string, 0, len(shorts))
+		for _, s := range shorts {
+			ids = append(ids, s.Book.ID)
+		}
+		sum := sha1.Sum([]byte(strings.Join(ids, ",")))
+		sig := hex.EncodeToString(sum[:8]) // short signature
+
+		kRecs := fmt.Sprintf("recs:%s:f=%s:r=%d:sig=%s", day, fieldsKey, lim.Recs, sig)
+
+		// Try cache
+		if hit, ok2 := c.mget(ctx, kRecs); ok2 && len(hit) == 1 && hit[0] != nil {
+			if err := json.Unmarshal(hit[0], &recs); err == nil {
+				dbg("cache hit: recs (%d items)", len(recs))
+			} else {
+				errf("cache unmarshal recs failed", err)
+				recs = nil
+			}
+		}
+
+		// Build if miss
+		if recs == nil {
+			ctxR, cancel := context.WithTimeout(ctx, blockTO)
+			defer cancel()
+
+			r, err := pickRecs(ctxR, db, lim.Recs, shorts, rng, f)
+			if err != nil {
+				if !errors.Is(err, sql.ErrNoRows) {
+					errf("recs", err)
+				}
+				recs = []BookLite{}
+			} else if r == nil {
+				recs = []BookLite{}
+			} else {
+				recs = r
+				if b, err := json.Marshal(recs); err == nil {
+					toCache2h[c.key(kRecs)] = b
+				}
+			}
+		}
+	}
+
+	// ------------------ TRENDING (timeout + cache 2h) ------------------
+	if trending == nil {
+		ctxT, cancel := context.WithTimeout(ctx, blockTO)
+		defer cancel()
+
+		t, err := pickTrending(ctxT, db, lim.Trending, f)
+		if err != nil {
+			if !errors.Is(err, sql.ErrNoRows) {
+				errf("trending", err)
+			}
+			trending = []BookLite{}
+		} else if t == nil {
+			trending = []BookLite{}
+		} else {
+			trending = t
+			if b, err := json.Marshal(trending); err == nil {
+				toCache2h[c.key(kTrending)] = b
+			}
+		}
+	}
+
+	// ------------------ NEW (timeout + cache 2h) ------------------
+	if newest == nil {
+		ctxN, cancel := context.WithTimeout(ctx, blockTO)
+		defer cancel()
+
+		n, err := pickNewest(ctxN, db, lim.New, f)
+		if err != nil {
+			if !errors.Is(err, sql.ErrNoRows) {
+				errf("new", err)
+			}
+			newest = []BookLite{}
+		} else if n == nil {
+			newest = []BookLite{}
+		} else {
+			newest = n
+			if b, err := json.Marshal(newest); err == nil {
+				toCache2h[c.key(kNew)] = b
+			}
+		}
+	}
+
+	// Best-effort pipelined cache set (2h TTL keys)
+	c.setPipeline(ctx, toCache2h)
+
+	// ------------------ Assemble response ------------------
 	sec := Sections{
 		Shorts:          shorts,
 		Recs:            recs,
 		Trending:        trending,
 		New:             newest,
 		ContinueReading: []BookLite{},
-	}
-
-	if rdb != nil {
-		if b, err := json.Marshal(sec); err == nil {
-			_ = rdb.Set(ctx, cacheKey, b, feedCacheTTL).Err()
-		}
 	}
 	return sec, nil
 }

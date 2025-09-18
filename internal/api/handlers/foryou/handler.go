@@ -50,13 +50,21 @@ type BookLite struct {
 
 func Handler(db *sql.DB, rdb *redis.Client) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// top-level guard (kept at 2s)
 		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 		defer cancel()
 
 		fields := strings.TrimSpace(r.URL.Query().Get("fields"))
 		limit := parseLimit(r.URL.Query().Get("limit"), 8)
 
+		// DEBUG (you can remove later)
+		log.Printf("[for-you] raw=%q fields=%q", r.URL.RawQuery, fields)
+
 		want := wanted(fields)
+
+		// DEBUG (you can remove later)
+		log.Printf("[for-you] want: shorts=%t trending=%t new=%t most_viewed=%t",
+			want["shorts"], want["trending"], want["new"], want["most_viewed"])
 
 		resp := ForYouResponse{
 			Status: "success",
@@ -70,44 +78,30 @@ func Handler(db *sql.DB, rdb *redis.Client) http.Handler {
 			},
 		}
 
+		bt := blockTimeout()
+
 		if want["shorts"] {
-			items, err := fetchShorts(ctx, db, limit)
-			if err != nil {
-				log.Printf("[for-you] fetchShorts error: %v", err)
-				http.Error(w, "internal server error", http.StatusInternalServerError)
-				return
-			}
-			resp.Data.Shorts = items
+			resp.Data.Shorts = isolateBlock(ctx, "shorts", bt, func(c context.Context) ([]ShortItem, error) {
+				return fetchShorts(c, db, limit)
+			})
 		}
 
 		if want["trending"] {
-			items, err := fetchTrending(ctx, db, limit)
-			if err != nil {
-				log.Printf("[for-you] fetchTrending error: %v", err)
-				http.Error(w, "internal server error", http.StatusInternalServerError)
-				return
-			}
-			resp.Data.Trending = items
+			resp.Data.Trending = isolateBlock(ctx, "trending", bt, func(c context.Context) ([]BookLite, error) {
+				return fetchTrending(c, db, limit)
+			})
 		}
 
 		if want["new"] {
-			items, err := fetchNew(ctx, db, limit)
-			if err != nil {
-				log.Printf("[for-you] fetchNew error: %v", err)
-				http.Error(w, "internal server error", http.StatusInternalServerError)
-				return
-			}
-			resp.Data.New = items
+			resp.Data.New = isolateBlock(ctx, "new", bt, func(c context.Context) ([]BookLite, error) {
+				return fetchNew(c, db, limit)
+			})
 		}
 
 		if want["most_viewed"] {
-			items, err := fetchMostViewed(ctx, db, limit)
-			if err != nil {
-				log.Printf("[for-you] fetchMostViewed error: %v", err)
-				http.Error(w, "internal server error", http.StatusInternalServerError)
-				return
-			}
-			resp.Data.MostViewed = items
+			resp.Data.MostViewed = isolateBlock(ctx, "most_viewed", bt, func(c context.Context) ([]BookLite, error) {
+				return fetchMostViewed(c, db, limit)
+			})
 		}
 
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
