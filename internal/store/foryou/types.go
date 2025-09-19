@@ -1,7 +1,7 @@
 package foryou
 
 type Limits struct {
-	Shorts, Recs, Trending, New int
+	Shorts, Recs, Trending, New, MostViewed int
 }
 
 type Fields struct {
@@ -29,5 +29,6 @@ type Sections struct {
 	Recs            []BookLite  `json:"recs"`
 	Trending        []BookLite  `json:"trending"`
 	New             []BookLite  `json:"new"`
+	MostViewed      []BookLite  `json:"most_viewed"`
 	ContinueReading []BookLite  `json:"continue_reading"`
 }
