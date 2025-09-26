@@ -14,6 +14,7 @@ import (
 	"github.com/5w1tchy/books-api/internal/maintenance"
 	"github.com/5w1tchy/books-api/internal/metrics/viewqueue"
 	"github.com/5w1tchy/books-api/internal/repository/sqlconnect"
+	validatePkg "github.com/5w1tchy/books-api/internal/validate"
 	"github.com/5w1tchy/books-api/pkg/utils"
 	"github.com/joho/godotenv"
 	"github.com/redis/go-redis/v9"
@@ -21,6 +22,11 @@ import (
 
 func main() {
 	_ = godotenv.Load("../../.env")
+
+	// Validate critical env/config up front
+	if err := validatePkg.Env(); err != nil {
+		log.Fatal(err)
+	}
 
 	db, err := sqlconnect.ConnectDB()
 	if err != nil {
@@ -67,8 +73,12 @@ func main() {
 	}
 	defer rdb.Close()
 
-	if err := rdb.Ping(context.Background()).Err(); err != nil {
+	// Ping Redis with timeout (replaces previous Background() ping)
+	if err := validatePkg.PingRedis(rdb, 2*time.Second); err != nil {
 		log.Fatalf("Redis connection failed: %v", err)
+	}
+	for _, w := range validatePkg.HardeningWarnings(os.Getenv("APP_ENV")) {
+		log.Printf("WARN: %s", w)
 	}
 
 	// -------- Daily retention job for book_outputs (keep latest 5) ----------

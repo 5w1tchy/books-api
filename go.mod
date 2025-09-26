@@ -3,6 +3,8 @@ module github.com/5w1tchy/books-api
 go 1.25.0
 
 require (
+	github.com/alexedwards/argon2id v1.0.0
+	github.com/golang-jwt/jwt/v5 v5.3.0
 	github.com/jackc/pgconn v1.14.3
 	github.com/jackc/pgx/v5 v5.7.5
 	github.com/joho/godotenv v1.5.1
@@ -21,4 +23,5 @@ require (
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
 	golang.org/x/crypto v0.37.0 // indirect
 	golang.org/x/sync v0.13.0 // indirect
+	golang.org/x/sys v0.32.0 // indirect
 )
