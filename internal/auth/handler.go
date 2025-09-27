@@ -58,15 +58,9 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invalid_input", "Invalid email or password")
 		return
 	}
+
+	// Strength scoring (warn-only)
 	score, warnMsg, sugg := simpleStrength(req.Password, req.Email, req.Username)
-	var pwWarn any
-	if score < 3 {
-		pwWarn = map[string]any{
-			"score":       score,
-			"message":     warnMsg,
-			"suggestions": sugg,
-		}
-	}
 
 	hash, err := password.Hash(req.Password)
 	if err != nil {
@@ -92,13 +86,19 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Build response: always include password_score; include warning when score < 4
 	resp := map[string]any{
-		"access_token":  access,
-		"refresh_token": refresh,
+		"access_token":   access,
+		"refresh_token":  refresh,
+		"password_score": score,
 	}
-	if pwWarn != nil {
-		resp["password_warning"] = pwWarn
+	if score < 4 && warnMsg != "" {
+		resp["password_warning"] = map[string]any{
+			"message":     warnMsg,
+			"suggestions": sugg,
+		}
 	}
+
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -285,9 +285,9 @@ func (h *Handler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Warn-only strength: set headers (keep 200 JSON shape)
-	score, warnMsg, _ := simpleStrength(np)
-	if score < 3 {
+	// Warn-only strength: headers + capture score/message for body
+	score, warnMsg, sugg := simpleStrength(np)
+	if score < 3 { // keep your existing header behavior
 		w.Header().Set("X-Password-Score", strconv.Itoa(score))
 		if warnMsg != "" {
 			w.Header().Set("X-Password-Warning", warnMsg)
@@ -325,7 +325,20 @@ func (h *Handler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, TokenPair{AccessToken: access, RefreshToken: newRefresh})
+	// JSON: always include password_score; include warning when score < 4 (for consistency with Register)
+	resp := map[string]any{
+		"access_token":   access,
+		"refresh_token":  newRefresh,
+		"password_score": score,
+	}
+	if score < 4 && warnMsg != "" {
+		resp["password_warning"] = map[string]any{
+			"message":     warnMsg,
+			"suggestions": sugg,
+		}
+	}
+
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // utilities
