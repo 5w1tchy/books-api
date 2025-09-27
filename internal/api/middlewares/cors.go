@@ -36,7 +36,7 @@ func Cors(next http.Handler) http.Handler {
 		w.Header().Set("Access-Control-Max-Age", "3600")
 
 		w.Header().Set("Access-Control-Expose-Headers",
-			"Authorization, X-Request-ID, X-RateLimit-Policy, X-RateLimit-Limit, X-RateLimit-Remaining, Retry-After, X-Response-Time")
+			"Authorization, X-Request-ID, X-RateLimit-Policy, X-RateLimit-Limit, X-RateLimit-Remaining, Retry-After, X-Response-Time, X-Password-Warning, X-Password-Score")
 
 		if r.Method == http.MethodOptions {
 			w.Header().Add("Vary", "Access-Control-Request-Method")

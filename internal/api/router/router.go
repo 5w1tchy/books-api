@@ -47,12 +47,7 @@ func Router(db *sql.DB, rdb *redis.Client) http.Handler {
 	authH := auth.New(authStore, rdb)
 
 	mux.HandleFunc("POST /auth/register", authH.Register)
-
-	// Login with per-IP rate limit
-	mux.Handle("POST /auth/login",
-		middlewares.LoginRateLimit(rdb, http.HandlerFunc(authH.Login)),
-	)
-
+	mux.Handle("POST /auth/login", middlewares.LoginRateLimit(rdb, http.HandlerFunc(authH.Login)))
 	mux.HandleFunc("POST /auth/refresh", authH.Refresh)
 	mux.HandleFunc("POST /auth/logout", authH.Logout)
 
@@ -60,6 +55,15 @@ func Router(db *sql.DB, rdb *redis.Client) http.Handler {
 	mux.Handle("GET /auth/me", middlewares.RequireAuth(db, http.HandlerFunc(authH.Me)))
 	mux.Handle("POST /auth/logout-all", middlewares.RequireAuth(db, http.HandlerFunc(authH.LogoutAll)))
 	mux.Handle("POST /auth/change-password", middlewares.RequireAuth(db, http.HandlerFunc(authH.ChangePassword)))
+
+	// Email verification
+	verify := &auth.VerifyDeps{DB: db, RDB: rdb, BaseURL: ""}
+	mux.Handle("POST /auth/send-verification",
+		middlewares.RequireAuth(db, verify.HandleSendVerification(
+			func(r *http.Request) (string, bool) { return middlewares.UserIDFrom(r.Context()) },
+		)),
+	)
+	mux.HandleFunc("GET /auth/verify", verify.HandleVerify())
 
 	return mux
 }
