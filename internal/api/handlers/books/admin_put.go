@@ -12,21 +12,28 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-type createReq struct {
+type adminReplaceReq struct {
 	Title         string   `json:"title"`
 	Author        string   `json:"author"`
 	CategorySlugs []string `json:"categories,omitempty"`
 }
 
-func create(db *sql.DB, rdb *redis.Client) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
+// AdminPut: PUT /admin/books/{key}
+func AdminPut(db *sql.DB, rdb *redis.Client) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPut {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
 
-		var req createReq
+		key := r.PathValue("key")
+		if key == "" {
+			http.Error(w, `{"status":"error","error":"missing key"}`, http.StatusBadRequest)
+			return
+		}
+
+		var req adminReplaceReq
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, `{"status":"error","error":"invalid JSON"}`, http.StatusBadRequest)
 			return
@@ -44,13 +51,15 @@ func create(db *sql.DB, rdb *redis.Client) http.HandlerFunc {
 			Author:        req.Author,
 			CategorySlugs: req.CategorySlugs,
 		}
-		book, err := storebooks.Create(r.Context(), db, dto)
-		if err != nil {
-			http.Error(w, `{"status":"error","error":"failed to create book"}`, http.StatusInternalServerError)
+		b, err := storebooks.Replace(r.Context(), db, key, dto)
+		if err == sql.ErrNoRows {
+			http.Error(w, `{"status":"error","error":"not found"}`, http.StatusNotFound)
+			return
+		} else if err != nil {
+			http.Error(w, `{"status":"error","error":"failed to replace"}`, http.StatusInternalServerError)
 			return
 		}
 
-		// Best-effort global cache bust for /for-you
 		if err := storeforyou.BumpVersion(r.Context(), rdb); err != nil {
 			log.Printf("[for-you] bump version failed: %v", err)
 		}
@@ -58,10 +67,7 @@ func create(db *sql.DB, rdb *redis.Client) http.HandlerFunc {
 		resp := struct {
 			Status string                `json:"status"`
 			Data   storebooks.PublicBook `json:"data"`
-		}{
-			Status: "success",
-			Data:   book,
-		}
+		}{"success", b}
 		_ = json.NewEncoder(w).Encode(resp)
-	}
+	})
 }

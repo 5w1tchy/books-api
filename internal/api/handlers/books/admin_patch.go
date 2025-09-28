@@ -11,14 +11,15 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-type patchReq struct {
+type adminPatchReq struct {
 	Title         *string   `json:"title,omitempty"`
 	Author        *string   `json:"author,omitempty"`
 	CategorySlugs *[]string `json:"categories,omitempty"`
 }
 
-func patch(db *sql.DB, rdb *redis.Client) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
+// AdminPatch: PATCH /admin/books/{key}
+func AdminPatch(db *sql.DB, rdb *redis.Client) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPatch {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
@@ -31,7 +32,7 @@ func patch(db *sql.DB, rdb *redis.Client) http.HandlerFunc {
 			return
 		}
 
-		var req patchReq
+		var req adminPatchReq
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, `{"status":"error","error":"invalid JSON"}`, http.StatusBadRequest)
 			return
@@ -51,7 +52,6 @@ func patch(db *sql.DB, rdb *redis.Client) http.HandlerFunc {
 			return
 		}
 
-		// Invalidate /for-you cache generation (best-effort).
 		if err := storeforyou.BumpVersion(r.Context(), rdb); err != nil {
 			log.Printf("[for-you] bump version failed: %v", err)
 		}
@@ -61,5 +61,5 @@ func patch(db *sql.DB, rdb *redis.Client) http.HandlerFunc {
 			Data   storebooks.PublicBook `json:"data"`
 		}{"success", b}
 		_ = json.NewEncoder(w).Encode(resp)
-	}
+	})
 }

@@ -3,6 +3,7 @@ module github.com/5w1tchy/books-api
 go 1.25.0
 
 require (
+	github.com/DATA-DOG/go-sqlmock v1.5.2
 	github.com/alexedwards/argon2id v1.0.0
 	github.com/golang-jwt/jwt/v5 v5.3.0
 	github.com/jackc/pgconn v1.14.3

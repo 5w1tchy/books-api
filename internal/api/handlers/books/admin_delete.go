@@ -10,8 +10,9 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-func del(db *sql.DB, rdb *redis.Client) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
+// AdminDelete: DELETE /admin/books/{key}
+func AdminDelete(db *sql.DB, rdb *redis.Client) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodDelete {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
@@ -34,8 +35,6 @@ func del(db *sql.DB, rdb *redis.Client) http.HandlerFunc {
 		if err := storeforyou.BumpVersion(r.Context(), rdb); err != nil {
 			log.Printf("[for-you] bump version failed: %v", err)
 		}
-
-		// No response body on successful delete.
 		w.WriteHeader(http.StatusNoContent)
-	}
+	})
 }
