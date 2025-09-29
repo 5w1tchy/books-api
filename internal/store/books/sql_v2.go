@@ -429,6 +429,50 @@ func DeleteV2(ctx context.Context, db *sql.DB, key string) error {
 	return tx.Commit()
 }
 
+// GetAllCategories returns all existing category names for autocomplete
+func GetAllCategories(ctx context.Context, db *sql.DB) ([]string, error) {
+	rows, err := db.QueryContext(ctx, `
+        SELECT DISTINCT name FROM public.categories 
+        ORDER BY name
+    `)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var categories []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		categories = append(categories, name)
+	}
+	return categories, rows.Err()
+}
+
+// GetAllAuthors returns all existing author names for autocomplete
+func GetAllAuthors(ctx context.Context, db *sql.DB) ([]string, error) {
+	rows, err := db.QueryContext(ctx, `
+        SELECT DISTINCT name FROM public.authors 
+        ORDER BY name
+    `)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var authors []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		authors = append(authors, name)
+	}
+	return authors, rows.Err()
+}
+
 // -------- helpers --------
 
 func trimAll(dto *CreateBookV2DTO) {
