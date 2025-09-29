@@ -40,6 +40,8 @@ func MountAdmin(mux *http.ServeMux, db *sql.DB, rdb *redis.Client) {
 	mux.Handle("PATCH /admin/books/{key}", gate(books.AdminPatch(db, rdb)))
 	mux.Handle("PUT /admin/books/{key}", gate(books.AdminPut(db, rdb)))
 	mux.Handle("DELETE /admin/books/{key}", gate(books.AdminDelete(db, rdb)))
+	mux.Handle("GET /admin/books", gate(books.AdminList(db, rdb)))
+	mux.Handle("GET /admin/books/{key}", gate(books.AdminGet(db, rdb)))
 
 	// --- Admin autocomplete endpoints ---
 	mux.Handle("GET /admin/categories", gate(books.AdminGetCategories(db, rdb)))

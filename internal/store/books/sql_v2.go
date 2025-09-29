@@ -40,6 +40,14 @@ type UpdateBookV2DTO struct {
 	Summary    *string   `json:"summary,omitempty"`
 }
 
+type ListBooksFilter struct {
+	Query      string // search in title, author names
+	Category   string // filter by category name
+	AuthorName string // filter by author name
+	Page       int
+	Size       int
+}
+
 var codeRE = regexp.MustCompile(`^[a-z0-9-]{3,64}$`)
 
 // CreateV2 inserts a book with rich fields, upserts authors & categories, and returns the full record.
@@ -235,6 +243,130 @@ func GetAdminBookByKey(ctx context.Context, db *sql.DB, key string) (AdminBook, 
 	}
 
 	return book, nil
+}
+
+// ListAdminBooks returns paginated books for admin panel
+func ListAdminBooks(ctx context.Context, db *sql.DB, filter ListBooksFilter) ([]AdminBook, int, error) {
+	if filter.Page < 1 {
+		filter.Page = 1
+	}
+	if filter.Size < 1 || filter.Size > 100 {
+		filter.Size = 25
+	}
+
+	// Build WHERE conditions
+	var conditions []string
+	var args []interface{}
+	argIndex := 1
+
+	baseQuery := `
+        FROM public.books b
+        LEFT JOIN public.book_authors ba ON b.id = ba.book_id
+        LEFT JOIN public.authors a ON ba.author_id = a.id
+        LEFT JOIN public.book_categories bc ON b.id = bc.book_id
+        LEFT JOIN public.categories c ON bc.category_id = c.id
+    `
+
+	if filter.Query != "" {
+		conditions = append(conditions, fmt.Sprintf("(b.title ILIKE $%d OR a.name ILIKE $%d)", argIndex, argIndex))
+		args = append(args, "%"+filter.Query+"%")
+		argIndex++
+	}
+
+	if filter.Category != "" {
+		conditions = append(conditions, fmt.Sprintf("c.name ILIKE $%d", argIndex))
+		args = append(args, "%"+filter.Category+"%")
+		argIndex++
+	}
+
+	if filter.AuthorName != "" {
+		conditions = append(conditions, fmt.Sprintf("a.name ILIKE $%d", argIndex))
+		args = append(args, "%"+filter.AuthorName+"%")
+		argIndex++
+	}
+
+	whereClause := ""
+	if len(conditions) > 0 {
+		whereClause = "WHERE " + strings.Join(conditions, " AND ")
+	}
+
+	// Count total
+	countQuery := "SELECT COUNT(DISTINCT b.id) " + baseQuery + " " + whereClause
+	var total int
+	if err := db.QueryRowContext(ctx, countQuery, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+
+	// Get books
+	offset := (filter.Page - 1) * filter.Size
+	listQuery := fmt.Sprintf(`
+        SELECT DISTINCT b.id, COALESCE(b.code, ''), b.title, COALESCE(b.short, ''), COALESCE(b.summary, ''), b.created_at
+        %s %s
+        ORDER BY b.created_at DESC
+        LIMIT $%d OFFSET $%d
+    `, baseQuery, whereClause, argIndex, argIndex+1)
+
+	args = append(args, filter.Size, offset)
+
+	rows, err := db.QueryContext(ctx, listQuery, args...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	var books []AdminBook
+	for rows.Next() {
+		var book AdminBook
+		if err := rows.Scan(&book.ID, &book.Code, &book.Title, &book.Short, &book.Summary, &book.CreatedAt); err != nil {
+			return nil, 0, err
+		}
+
+		// Get authors for this book
+		authorRows, err := db.QueryContext(ctx, `
+            SELECT a.name FROM public.authors a
+            JOIN public.book_authors ba ON a.id = ba.author_id
+            WHERE ba.book_id = $1
+            ORDER BY a.name
+        `, book.ID)
+		if err != nil {
+			return nil, 0, err
+		}
+
+		for authorRows.Next() {
+			var author string
+			if err := authorRows.Scan(&author); err != nil {
+				authorRows.Close()
+				return nil, 0, err
+			}
+			book.Authors = append(book.Authors, author)
+		}
+		authorRows.Close()
+
+		// Get categories for this book
+		catRows, err := db.QueryContext(ctx, `
+            SELECT c.name FROM public.categories c
+            JOIN public.book_categories bc ON c.id = bc.category_id
+            WHERE bc.book_id = $1
+            ORDER BY c.name
+        `, book.ID)
+		if err != nil {
+			return nil, 0, err
+		}
+
+		for catRows.Next() {
+			var category string
+			if err := catRows.Scan(&category); err != nil {
+				catRows.Close()
+				return nil, 0, err
+			}
+			book.Categories = append(book.Categories, category)
+		}
+		catRows.Close()
+
+		books = append(books, book)
+	}
+
+	return books, total, rows.Err()
 }
 
 // ReplaceV2 replaces all fields of an existing book
