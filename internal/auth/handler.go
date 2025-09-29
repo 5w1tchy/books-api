@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"strconv"
@@ -31,6 +32,7 @@ type MeResponse struct {
 	ID            string     `json:"id"`
 	Email         string     `json:"email"`
 	Username      string     `json:"username"`
+	Role          string     `json:"role"`
 	Status        string     `json:"status"`
 	EmailVerified *time.Time `json:"email_verified_at"`
 	CreatedAt     time.Time  `json:"created_at"`
@@ -52,12 +54,22 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// DEBUG: Log what we received
+	fmt.Printf("DEBUG: Received registration request - Email: %s, Role: %s\n", req.Email, req.Role)
+
 	// Password policy: trim + min length (8). Warn-only strength info.
 	req.Password = strings.TrimSpace(req.Password)
 	if len(req.Password) < 8 || req.Email == "" {
 		writeErr(w, http.StatusBadRequest, "invalid_input", "Invalid email or password")
 		return
 	}
+
+	// DEFAULT role to "user" ONLY if not specified or empty
+	if req.Role == "" {
+		req.Role = "user"
+	}
+
+	// Rest of function...
 
 	// Strength scoring (warn-only)
 	score, warnMsg, sugg := simpleStrength(req.Password, req.Email, req.Username)
@@ -68,7 +80,7 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	u, err := h.Store.CreateUser(req.Email, req.Username, hash)
+	u, err := h.Store.CreateUser(req.Email, req.Username, hash, req.Role)
 	if err != nil {
 		writeErr(w, http.StatusConflict, "conflict", "Cannot create user")
 		return
@@ -197,6 +209,7 @@ func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
+// Update the Me function to include role (around line 180)
 func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {
 	userID, ok := middlewares.UserIDFrom(r.Context())
 	if !ok {
@@ -204,12 +217,12 @@ func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	const q = `
-		SELECT id, email, username, status, email_verified_at, created_at
-		FROM public.users WHERE id=$1 LIMIT 1;
-	`
+        SELECT id, email, username, role, status, email_verified_at, created_at
+        FROM public.users WHERE id=$1 LIMIT 1;
+    `
 	var resp MeResponse
 	if err := h.Store.(*SQLStore).DB.QueryRowContext(r.Context(), q, userID).Scan(
-		&resp.ID, &resp.Email, &resp.Username, &resp.Status, &resp.EmailVerified, &resp.CreatedAt,
+		&resp.ID, &resp.Email, &resp.Username, &resp.Role, &resp.Status, &resp.EmailVerified, &resp.CreatedAt,
 	); err != nil {
 		writeErr(w, http.StatusNotFound, "not_found", "User not found")
 		return

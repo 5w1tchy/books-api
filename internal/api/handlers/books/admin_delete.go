@@ -2,6 +2,7 @@ package books
 
 import (
 	"database/sql"
+	"encoding/json"
 	"log"
 	"net/http"
 
@@ -17,13 +18,15 @@ func AdminDelete(db *sql.DB, rdb *redis.Client) http.Handler {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
+		w.Header().Set("Content-Type", "application/json")
+
 		key := r.PathValue("key")
 		if key == "" {
 			http.Error(w, `{"status":"error","error":"missing key"}`, http.StatusBadRequest)
 			return
 		}
 
-		if err := storebooks.Delete(r.Context(), db, key); err == sql.ErrNoRows {
+		if err := storebooks.DeleteV2(r.Context(), db, key); err == sql.ErrNoRows {
 			http.Error(w, `{"status":"error","error":"not found"}`, http.StatusNotFound)
 			return
 		} else if err != nil {
@@ -35,6 +38,11 @@ func AdminDelete(db *sql.DB, rdb *redis.Client) http.Handler {
 		if err := storeforyou.BumpVersion(r.Context(), rdb); err != nil {
 			log.Printf("[for-you] bump version failed: %v", err)
 		}
-		w.WriteHeader(http.StatusNoContent)
+
+		// Return success response
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":  "success",
+			"message": "book deleted successfully",
+		})
 	})
 }

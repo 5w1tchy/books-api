@@ -21,18 +21,12 @@ func Router(db *sql.DB, rdb *redis.Client) http.Handler {
 	mux.HandleFunc("GET /healthz", handlers.Healthz)
 	mux.HandleFunc("HEAD /healthz", handlers.Healthz)
 
-	// Books (reads are open)
+	// Books (READ-ONLY - public access)
 	mux.Handle("GET /books", books.Handler(db, rdb))        // list
-	mux.Handle("GET /books/{key}", books.Handler(db, rdb))  // get by key/code/slug (your handler decides)
+	mux.Handle("GET /books/{key}", books.Handler(db, rdb))  // get by key/code/slug
 	mux.Handle("HEAD /books/{key}", books.Handler(db, rdb)) // head
 	mux.Handle("OPTIONS /books", books.Handler(db, rdb))    // preflight
 	mux.Handle("OPTIONS /books/{key}", books.Handler(db, rdb))
-
-	// Books (writes) — admin only
-	// NOTE: We removed public POST /books. Creation is now at POST /admin/books (mounted in MountAdmin).
-	mux.Handle("PATCH /books/{key}", middlewares.RequireRole(db, "admin", books.Handler(db, rdb)))
-	mux.Handle("PUT /books/{key}", middlewares.RequireRole(db, "admin", books.Handler(db, rdb)))
-	mux.Handle("DELETE /books/{key}", middlewares.RequireRole(db, "admin", books.Handler(db, rdb)))
 
 	// Search
 	mux.Handle("GET /search/suggest", search.Suggest(db))
@@ -65,7 +59,7 @@ func Router(db *sql.DB, rdb *redis.Client) http.Handler {
 	)
 	mux.HandleFunc("GET /auth/verify", verify.HandleVerify())
 
-	// Admin (users, audit, stats, and admin-only book creation) — mounted via helper
+	// Admin (users, audit, stats, and admin-only book CRUD) — mounted via helper
 	MountAdmin(mux, db, rdb)
 
 	return mux

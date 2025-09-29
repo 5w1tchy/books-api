@@ -6,6 +6,7 @@ type RegisterRequest struct {
 	Email    string `json:"email"`
 	Username string `json:"username"`
 	Password string `json:"password"`
+	Role     string `json:"role"`
 }
 
 type LoginRequest struct {
@@ -33,7 +34,7 @@ type User struct {
 
 // Keep DB details abstract so we don’t assume your SQL layer.
 type UserStore interface {
-	CreateUser(email, username, passwordHash string) (User, error)
+	CreateUser(email, username, passwordHash, role string) (User, error) // Add role parameter
 	FindUserByEmail(email string) (User, error)
 	UpdateUserPasswordHash(userID, newHash string) error
 }

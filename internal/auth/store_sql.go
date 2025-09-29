@@ -11,16 +11,16 @@ type SQLStore struct {
 
 func NewSQLStore(db *sql.DB) *SQLStore { return &SQLStore{DB: db} }
 
-func (s *SQLStore) CreateUser(email, username, passwordHash string) (User, error) {
+func (s *SQLStore) CreateUser(email, username, passwordHash, role string) (User, error) {
 	const q = `
-		INSERT INTO public.users (email, username, password_hash)
-		VALUES ($1, $2, $3)
-		RETURNING id, email, username, password_hash,
-		         COALESCE(token_version,1) AS token_version,
-		         status, email_verified_at, created_at, updated_at, role;
-	`
+        INSERT INTO public.users (email, username, password_hash, role)
+        VALUES ($1, $2, $3, $4)
+        RETURNING id, email, username, password_hash,
+                 COALESCE(token_version,1) AS token_version,
+                 status, email_verified_at, created_at, updated_at, role;
+    `
 	var u User
-	err := s.DB.QueryRowContext(context.Background(), q, email, username, passwordHash).Scan(
+	err := s.DB.QueryRowContext(context.Background(), q, email, username, passwordHash, role).Scan(
 		&u.ID, &u.Email, &u.Username, &u.PasswordHash, &u.TokenVersion,
 		&u.Status, &u.EmailVerified, &u.CreatedAt, &u.UpdatedAt, &u.Role,
 	)

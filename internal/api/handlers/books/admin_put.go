@@ -13,9 +13,12 @@ import (
 )
 
 type adminReplaceReq struct {
-	Title         string   `json:"title"`
-	Author        string   `json:"author"`
-	CategorySlugs []string `json:"categories,omitempty"`
+	Coda       string   `json:"coda,omitempty"`
+	Title      string   `json:"title"`
+	Authors    []string `json:"authors"`    // Changed from single Author
+	Categories []string `json:"categories"` // Changed from CategorySlugs
+	Short      string   `json:"short,omitempty"`
+	Summary    string   `json:"summary,omitempty"`
 }
 
 // AdminPut: PUT /admin/books/{key}
@@ -39,19 +42,32 @@ func AdminPut(db *sql.DB, rdb *redis.Client) http.Handler {
 			return
 		}
 
+		// Validation similar to create
 		req.Title = strings.TrimSpace(req.Title)
-		req.Author = strings.TrimSpace(req.Author)
-		if req.Title == "" || req.Author == "" {
-			http.Error(w, `{"status":"error","error":"title and author are required"}`, http.StatusBadRequest)
+		if req.Title == "" {
+			http.Error(w, `{"status":"error","error":"title is required"}`, http.StatusBadRequest)
+			return
+		}
+		if len(req.Authors) == 0 {
+			http.Error(w, `{"status":"error","error":"at least one author is required"}`, http.StatusBadRequest)
+			return
+		}
+		if len(req.Categories) == 0 {
+			http.Error(w, `{"status":"error","error":"at least one category is required"}`, http.StatusBadRequest)
 			return
 		}
 
-		dto := storebooks.CreateBookDTO{
-			Title:         req.Title,
-			Author:        req.Author,
-			CategorySlugs: req.CategorySlugs,
+		dto := storebooks.CreateBookV2DTO{
+			Code:       req.Coda,
+			Title:      req.Title,
+			Authors:    req.Authors,
+			Categories: req.Categories,
+			Short:      req.Short,
+			Summary:    req.Summary,
 		}
-		b, err := storebooks.Replace(r.Context(), db, key, dto)
+
+		// You'll need to implement this in sql_v2.go
+		b, err := storebooks.ReplaceV2(r.Context(), db, key, dto)
 		if err == sql.ErrNoRows {
 			http.Error(w, `{"status":"error","error":"not found"}`, http.StatusNotFound)
 			return
@@ -65,8 +81,8 @@ func AdminPut(db *sql.DB, rdb *redis.Client) http.Handler {
 		}
 
 		resp := struct {
-			Status string                `json:"status"`
-			Data   storebooks.PublicBook `json:"data"`
+			Status string               `json:"status"`
+			Data   storebooks.AdminBook `json:"data"`
 		}{"success", b}
 		_ = json.NewEncoder(w).Encode(resp)
 	})

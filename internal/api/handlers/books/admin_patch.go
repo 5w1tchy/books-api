@@ -12,9 +12,12 @@ import (
 )
 
 type adminPatchReq struct {
-	Title         *string   `json:"title,omitempty"`
-	Author        *string   `json:"author,omitempty"`
-	CategorySlugs *[]string `json:"categories,omitempty"`
+	Coda       *string   `json:"coda,omitempty"`
+	Title      *string   `json:"title,omitempty"`
+	Authors    *[]string `json:"authors,omitempty"`
+	Categories *[]string `json:"categories,omitempty"`
+	Short      *string   `json:"short,omitempty"`
+	Summary    *string   `json:"summary,omitempty"`
 }
 
 // AdminPatch: PATCH /admin/books/{key}
@@ -38,12 +41,15 @@ func AdminPatch(db *sql.DB, rdb *redis.Client) http.Handler {
 			return
 		}
 
-		dto := storebooks.UpdateBookDTO{
-			Title:         req.Title,
-			Author:        req.Author,
-			CategorySlugs: req.CategorySlugs,
-		}
-		b, err := storebooks.Patch(r.Context(), db, key, dto)
+		// You'll need to implement this in sql_v2.go
+		b, err := storebooks.PatchV2(r.Context(), db, key, storebooks.UpdateBookV2DTO{
+			Code:       req.Coda,
+			Title:      req.Title,
+			Authors:    req.Authors,
+			Categories: req.Categories,
+			Short:      req.Short,
+			Summary:    req.Summary,
+		})
 		if err == sql.ErrNoRows {
 			http.Error(w, `{"status":"error","error":"not found"}`, http.StatusNotFound)
 			return
@@ -57,8 +63,8 @@ func AdminPatch(db *sql.DB, rdb *redis.Client) http.Handler {
 		}
 
 		resp := struct {
-			Status string                `json:"status"`
-			Data   storebooks.PublicBook `json:"data"`
+			Status string               `json:"status"`
+			Data   storebooks.AdminBook `json:"data"`
 		}{"success", b}
 		_ = json.NewEncoder(w).Encode(resp)
 	})

@@ -12,7 +12,7 @@ import (
 )
 
 type adminCreateReq struct {
-	Code       string   `json:"code,omitempty"`
+	Coda       string   `json:"coda"`
 	Title      string   `json:"title"`
 	Authors    []string `json:"authors"`    // >=1
 	Categories []string `json:"categories"` // >=1
@@ -40,8 +40,9 @@ func AdminCreate(db *sql.DB, _ *redis.Client) http.Handler {
 			http.Error(w, `{"status":"error","error":"invalid JSON"}`, http.StatusBadRequest)
 			return
 		}
+
 		// normalize
-		in.Code = strings.TrimSpace(in.Code)
+		in.Coda = strings.TrimSpace(in.Coda)
 		in.Title = strings.TrimSpace(in.Title)
 		for i := range in.Authors {
 			in.Authors[i] = strings.TrimSpace(in.Authors[i])
@@ -65,8 +66,8 @@ func AdminCreate(db *sql.DB, _ *redis.Client) http.Handler {
 			http.Error(w, `{"status":"error","error":"at least one category is required"}`, http.StatusBadRequest)
 			return
 		}
-		if in.Code != "" && !codeRE.MatchString(in.Code) {
-			http.Error(w, `{"status":"error","error":"invalid code format"}`, http.StatusBadRequest)
+		if in.Coda != "" && !codeRE.MatchString(in.Coda) {
+			http.Error(w, `{"status":"error","error":"invalid coda format"}`, http.StatusBadRequest)
 			return
 		}
 		if len(in.Short) > 280 {
@@ -79,7 +80,7 @@ func AdminCreate(db *sql.DB, _ *redis.Client) http.Handler {
 		}
 
 		dto := storebooks.CreateBookV2DTO{
-			Code:       in.Code,
+			Code:       in.Coda,
 			Title:      in.Title,
 			Authors:    in.Authors,
 			Categories: in.Categories,
@@ -91,7 +92,7 @@ func AdminCreate(db *sql.DB, _ *redis.Client) http.Handler {
 		if err != nil {
 			// unique code
 			if strings.Contains(strings.ToLower(err.Error()), "code_exists") {
-				http.Error(w, `{"status":"error","error":"code already exists"}`, http.StatusConflict)
+				http.Error(w, `{"status":"error","error":"coda already exists"}`, http.StatusConflict)
 				return
 			}
 			http.Error(w, `{"status":"error","error":"failed to create book"}`, http.StatusInternalServerError)
