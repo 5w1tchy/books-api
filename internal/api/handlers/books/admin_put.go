@@ -58,7 +58,7 @@ func AdminPut(db *sql.DB, rdb *redis.Client) http.Handler {
 		}
 
 		dto := storebooks.CreateBookV2DTO{
-			Code:       req.Coda,
+			Coda:       req.Coda,
 			Title:      req.Title,
 			Authors:    req.Authors,
 			Categories: req.Categories,

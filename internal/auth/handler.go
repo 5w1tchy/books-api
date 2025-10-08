@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/5w1tchy/books-api/internal/api/httpx"
 	"github.com/5w1tchy/books-api/internal/api/middlewares"
 	jwtutil "github.com/5w1tchy/books-api/internal/security/jwt"
 	"github.com/5w1tchy/books-api/internal/security/password"
@@ -50,7 +51,7 @@ func New(store UserStore, rdb *redis.Client) *Handler {
 func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 	var req RegisterRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeErr(w, http.StatusBadRequest, "bad_request", "Invalid JSON")
+		httpx.ErrorCode(w, http.StatusBadRequest, "bad_request", "Invalid JSON")
 		return
 	}
 
@@ -60,7 +61,7 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 	// Password policy: trim + min length (8). Warn-only strength info.
 	req.Password = strings.TrimSpace(req.Password)
 	if len(req.Password) < 8 || req.Email == "" {
-		writeErr(w, http.StatusBadRequest, "invalid_input", "Invalid email or password")
+		httpx.ErrorCode(w, http.StatusBadRequest, "invalid_input", "Invalid email or password")
 		return
 	}
 
@@ -69,32 +70,30 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 		req.Role = "user"
 	}
 
-	// Rest of function...
-
 	// Strength scoring (warn-only)
 	score, warnMsg, sugg := simpleStrength(req.Password, req.Email, req.Username)
 
 	hash, err := password.Hash(req.Password)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "hash_error", "Failed to hash password")
+		httpx.ErrorCode(w, http.StatusInternalServerError, "hash_error", "Failed to hash password")
 		return
 	}
 
 	u, err := h.Store.CreateUser(req.Email, req.Username, hash, req.Role)
 	if err != nil {
-		writeErr(w, http.StatusConflict, "conflict", "Cannot create user")
+		httpx.ErrorCode(w, http.StatusConflict, "conflict", "Cannot create user")
 		return
 	}
 
 	access, _, err := jwtutil.SignAccess(u.ID, u.TokenVersion, jwtutil.DefaultAccessTTL())
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "jwt_error", "Failed to sign access token")
+		httpx.ErrorCode(w, http.StatusInternalServerError, "jwt_error", "Failed to sign access token")
 		return
 	}
 
 	refresh, err := h.issueRefresh(r.Context(), u.ID, u.TokenVersion)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "refresh_error", "Failed to issue refresh token")
+		httpx.ErrorCode(w, http.StatusInternalServerError, "refresh_error", "Failed to issue refresh token")
 		return
 	}
 
@@ -111,23 +110,23 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	writeJSON(w, http.StatusOK, resp)
+	httpx.WriteJSON(w, http.StatusOK, resp)
 }
 
 func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	var req LoginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeErr(w, http.StatusBadRequest, "bad_request", "Invalid JSON")
+		httpx.ErrorCode(w, http.StatusBadRequest, "bad_request", "Invalid JSON")
 		return
 	}
 	u, err := h.Store.FindUserByEmail(req.Email)
 	if err != nil || u.ID == "" {
-		writeErr(w, http.StatusUnauthorized, "invalid_credentials", "Invalid email or password")
+		httpx.ErrorCode(w, http.StatusUnauthorized, "invalid_credentials", "Invalid email or password")
 		return
 	}
 	ok, needsRehash, err := password.Verify(req.Password, u.PasswordHash)
 	if err != nil || !ok {
-		writeErr(w, http.StatusUnauthorized, "invalid_credentials", "Invalid email or password")
+		httpx.ErrorCode(w, http.StatusUnauthorized, "invalid_credentials", "Invalid email or password")
 		return
 	}
 	if needsRehash {
@@ -138,22 +137,22 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 
 	access, _, err := jwtutil.SignAccess(u.ID, u.TokenVersion, jwtutil.DefaultAccessTTL())
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "jwt_error", "Failed to sign access token")
+		httpx.ErrorCode(w, http.StatusInternalServerError, "jwt_error", "Failed to sign access token")
 		return
 	}
 	refresh, err := h.issueRefresh(r.Context(), u.ID, u.TokenVersion)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "refresh_error", "Failed to issue refresh token")
+		httpx.ErrorCode(w, http.StatusInternalServerError, "refresh_error", "Failed to issue refresh token")
 		return
 	}
 
-	writeJSON(w, http.StatusOK, TokenPair{AccessToken: access, RefreshToken: refresh})
+	httpx.WriteJSON(w, http.StatusOK, TokenPair{AccessToken: access, RefreshToken: refresh})
 }
 
 func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 	var req RefreshRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.RefreshToken == "" {
-		writeErr(w, http.StatusBadRequest, "bad_request", "Invalid JSON")
+		httpx.ErrorCode(w, http.StatusBadRequest, "bad_request", "Invalid JSON")
 		return
 	}
 	key := "rt:" + req.RefreshToken
@@ -161,13 +160,13 @@ func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	val, err := h.RDB.Get(ctx, key).Result()
 	if err != nil {
-		writeErr(w, http.StatusUnauthorized, "invalid_refresh", "Invalid refresh token")
+		httpx.ErrorCode(w, http.StatusUnauthorized, "invalid_refresh", "Invalid refresh token")
 		return
 	}
 
 	parts := strings.SplitN(val, "|", 2) // value: userID|tokenVersion
 	if len(parts) != 2 {
-		writeErr(w, http.StatusUnauthorized, "invalid_refresh", "Invalid refresh token")
+		httpx.ErrorCode(w, http.StatusUnauthorized, "invalid_refresh", "Invalid refresh token")
 		return
 	}
 	userID := parts[0]
@@ -177,7 +176,7 @@ func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 	var dbVer int
 	if err := h.Store.(*SQLStore).DB.QueryRowContext(ctx,
 		`SELECT COALESCE(token_version,1) FROM public.users WHERE id=$1`, userID).Scan(&dbVer); err != nil || dbVer != tv {
-		writeErr(w, http.StatusUnauthorized, "token_revoked", "Token has been revoked")
+		httpx.ErrorCode(w, http.StatusUnauthorized, "token_revoked", "Token has been revoked")
 		return
 	}
 
@@ -185,35 +184,35 @@ func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 	_ = h.RDB.Del(ctx, key).Err()
 	newRefresh, err := h.issueRefresh(ctx, userID, dbVer)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "refresh_error", "Failed to issue refresh token")
+		httpx.ErrorCode(w, http.StatusInternalServerError, "refresh_error", "Failed to issue refresh token")
 		return
 	}
 
 	access, _, err := jwtutil.SignAccess(userID, dbVer, jwtutil.DefaultAccessTTL())
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "jwt_error", "Failed to sign access token")
+		httpx.ErrorCode(w, http.StatusInternalServerError, "jwt_error", "Failed to sign access token")
 		return
 	}
 
-	writeJSON(w, http.StatusOK, TokenPair{AccessToken: access, RefreshToken: newRefresh})
+	httpx.WriteJSON(w, http.StatusOK, TokenPair{AccessToken: access, RefreshToken: newRefresh})
 }
 
 func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 	var req RefreshRequest
 	_ = json.NewDecoder(r.Body).Decode(&req)
 	if req.RefreshToken == "" {
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+		httpx.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 		return
 	}
 	_ = h.RDB.Del(r.Context(), "rt:"+req.RefreshToken).Err()
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	httpx.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
 // Update the Me function to include role (around line 180)
 func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {
 	userID, ok := middlewares.UserIDFrom(r.Context())
 	if !ok {
-		writeErr(w, http.StatusUnauthorized, "unauthorized", "Unauthorized")
+		httpx.ErrorCode(w, http.StatusUnauthorized, "unauthorized", "Unauthorized")
 		return
 	}
 	const q = `
@@ -224,10 +223,10 @@ func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {
 	if err := h.Store.(*SQLStore).DB.QueryRowContext(r.Context(), q, userID).Scan(
 		&resp.ID, &resp.Email, &resp.Username, &resp.Role, &resp.Status, &resp.EmailVerified, &resp.CreatedAt,
 	); err != nil {
-		writeErr(w, http.StatusNotFound, "not_found", "User not found")
+		httpx.ErrorCode(w, http.StatusNotFound, "not_found", "User not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, resp)
+	httpx.WriteJSON(w, http.StatusOK, resp)
 }
 
 // ---- refresh helpers (Redis allowlist Option B) ----
@@ -251,33 +250,33 @@ func (h *Handler) issueRefresh(ctx context.Context, userID string, tokenVersion 
 func (h *Handler) LogoutAll(w http.ResponseWriter, r *http.Request) {
 	userID, ok := middlewares.UserIDFrom(r.Context())
 	if !ok {
-		writeErr(w, http.StatusUnauthorized, "unauthorized", "Unauthorized")
+		httpx.ErrorCode(w, http.StatusUnauthorized, "unauthorized", "Unauthorized")
 		return
 	}
 	_, err := h.Store.(*SQLStore).DB.ExecContext(r.Context(),
 		`UPDATE public.users SET token_version = COALESCE(token_version,1) + 1, updated_at=now() WHERE id=$1`, userID)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "update_failed", "Failed to update token version")
+		httpx.ErrorCode(w, http.StatusInternalServerError, "update_failed", "Failed to update token version")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	httpx.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
 func (h *Handler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 	userID, ok := middlewares.UserIDFrom(r.Context())
 	if !ok {
-		writeErr(w, http.StatusUnauthorized, "unauthorized", "Unauthorized")
+		httpx.ErrorCode(w, http.StatusUnauthorized, "unauthorized", "Unauthorized")
 		return
 	}
 
 	var req ChangePasswordRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeErr(w, http.StatusBadRequest, "invalid_input", "Invalid input")
+		httpx.ErrorCode(w, http.StatusBadRequest, "invalid_input", "Invalid input")
 		return
 	}
 	np := strings.TrimSpace(req.NewPassword)
 	if len(np) < 8 || req.OldPassword == "" {
-		writeErr(w, http.StatusBadRequest, "invalid_input", "Invalid input")
+		httpx.ErrorCode(w, http.StatusBadRequest, "invalid_input", "Invalid input")
 		return
 	}
 
@@ -288,13 +287,13 @@ func (h *Handler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 		`SELECT password_hash, COALESCE(token_version,1) FROM public.users WHERE id=$1`, userID).
 		Scan(&storedHash, &tv)
 	if err != nil {
-		writeErr(w, http.StatusNotFound, "not_found", "User not found")
+		httpx.ErrorCode(w, http.StatusNotFound, "not_found", "User not found")
 		return
 	}
 
 	okPass, _, err := password.Verify(req.OldPassword, storedHash)
 	if err != nil || !okPass {
-		writeErr(w, http.StatusForbidden, "forbidden", "Invalid old password")
+		httpx.ErrorCode(w, http.StatusForbidden, "forbidden", "Invalid old password")
 		return
 	}
 
@@ -311,7 +310,7 @@ func (h *Handler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 
 	newPHC, err := password.Hash(np)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "hash_error", "Failed to hash new password")
+		httpx.ErrorCode(w, http.StatusInternalServerError, "hash_error", "Failed to hash new password")
 		return
 	}
 
@@ -322,19 +321,19 @@ func (h *Handler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 		 WHERE id=$2`,
 		newPHC, userID)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "update_failed", "Failed to update password")
+		httpx.ErrorCode(w, http.StatusInternalServerError, "update_failed", "Failed to update password")
 		return
 	}
 
 	// issue fresh tokens (tv+1)
 	access, _, err := jwtutil.SignAccess(userID, tv+1, jwtutil.DefaultAccessTTL())
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "jwt_error", "Failed to sign access token")
+		httpx.ErrorCode(w, http.StatusInternalServerError, "jwt_error", "Failed to sign access token")
 		return
 	}
 	newRefresh, err := h.issueRefresh(r.Context(), userID, tv+1)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "refresh_error", "Failed to issue refresh token")
+		httpx.ErrorCode(w, http.StatusInternalServerError, "refresh_error", "Failed to issue refresh token")
 		return
 	}
 
@@ -351,7 +350,7 @@ func (h *Handler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	writeJSON(w, http.StatusOK, resp)
+	httpx.WriteJSON(w, http.StatusOK, resp)
 }
 
 // utilities
@@ -374,12 +373,6 @@ func randToken() (string, error) {
 }
 
 func itoa(i int) string { return strconv.FormatInt(int64(i), 10) }
-
-func writeJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
-}
 
 // simpleStrength gives a coarse 0..4 score + short warning/suggestions (warn-only use).
 func simpleStrength(pwd string, hints ...string) (int, string, []string) {

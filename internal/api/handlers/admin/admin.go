@@ -139,7 +139,7 @@ func (h *Handler) ListUsers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]any{
-		"items": users, "total": total, "page": page, "size": size,
+		"data": users, "total": total, "page": page, "size": size,
 	})
 }
 
@@ -354,6 +354,6 @@ func (h *Handler) ListAudit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]any{
-		"items": items, "total": total, "page": page, "size": size,
+		"data": items, "total": total, "page": page, "size": size,
 	})
 }

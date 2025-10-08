@@ -6,9 +6,18 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	storebooks "github.com/5w1tchy/books-api/internal/store/books"
 )
+
+type PublicBook struct {
+	ID         string    `json:"id"`
+	Title      string    `json:"title"`
+	Authors    []string  `json:"authors"`
+	Categories []string  `json:"categories"`
+	CreatedAt  time.Time `json:"created_at"`
+}
 
 func list(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -18,42 +27,53 @@ func list(db *sql.DB) http.HandlerFunc {
 		}
 		w.Header().Set("Content-Type", "application/json")
 
+		// Get query parameters
 		q := strings.TrimSpace(r.URL.Query().Get("q"))
-		minSim := parseFloat(r.URL.Query().Get("min_sim"), 0.2)
-		author := strings.TrimSpace(strings.ToLower(r.URL.Query().Get("author")))
-		cats := parseCSV(r.URL.Query().Get("categories"))
-		match := strings.ToLower(r.URL.Query().Get("match"))
-		if match != "all" {
-			match = "any"
-		}
+		author := strings.TrimSpace(r.URL.Query().Get("author"))
+		category := strings.TrimSpace(r.URL.Query().Get("category"))
 		limit := clamp(parseInt(r.URL.Query().Get("limit"), 20), 1, 100)
 		offset := clamp(parseInt(r.URL.Query().Get("offset"), 0), 0, 100000)
 
-		f := storebooks.ListFilters{
-			Q:          q,
-			MinSim:     minSim,
-			Author:     author,
-			Categories: cats,
-			Match:      match,
-			Limit:      limit,
-			Offset:     offset,
+		// Convert offset to page for the admin function
+		page := (offset / limit) + 1
+
+		// Use the same filter as admin but with public-appropriate fields
+		filter := storebooks.ListBooksFilter{
+			Query:      q,
+			Category:   category,
+			AuthorName: author,
+			Page:       page,
+			Size:       limit,
 		}
 
-		items, total, err := storebooks.List(r.Context(), db, f)
+		// Use the existing ListAdminBooks function (it works!)
+		books, total, err := storebooks.ListAdminBooks(r.Context(), db, filter)
 		if err != nil {
 			http.Error(w, `{"status":"error","error":"failed to list"}`, http.StatusInternalServerError)
 			return
 		}
 
+		// Convert AdminBook to PublicBook format (remove sensitive fields)
+		publicBooks := make([]PublicBook, len(books))
+		for i, book := range books {
+			publicBooks[i] = PublicBook{
+				ID:         book.ID,
+				Title:      book.Title,
+				Authors:    book.Authors,
+				Categories: book.Categories,
+				CreatedAt:  book.CreatedAt,
+			}
+		}
+
 		resp := struct {
-			Status string                  `json:"status"`
-			Data   []storebooks.PublicBook `json:"data"`
-			Total  int                     `json:"total"`
-			Limit  int                     `json:"limit"`
-			Offset int                     `json:"offset"`
+			Status string       `json:"status"`
+			Data   []PublicBook `json:"data"`
+			Total  int          `json:"total"`
+			Limit  int          `json:"limit"`
+			Offset int          `json:"offset"`
 		}{
 			Status: "success",
-			Data:   items,
+			Data:   publicBooks,
 			Total:  total,
 			Limit:  limit,
 			Offset: offset,
@@ -62,35 +82,13 @@ func list(db *sql.DB) http.HandlerFunc {
 	}
 }
 
-func parseCSV(s string) []string {
-	if s == "" {
-		return nil
-	}
-	parts := strings.Split(s, ",")
-	out := make([]string, 0, len(parts))
-	for _, p := range parts {
-		p = strings.TrimSpace(strings.ToLower(p))
-		if p != "" {
-			out = append(out, p)
-		}
-	}
-	return out
-}
 func parseInt(s string, def int) int {
 	if n, err := strconv.Atoi(s); err == nil {
 		return n
 	}
 	return def
 }
-func parseFloat(s string, def float64) float64 {
-	if s == "" {
-		return def
-	}
-	if f, err := strconv.ParseFloat(s, 64); err == nil {
-		return f
-	}
-	return def
-}
+
 func clamp(n, lo, hi int) int {
 	if n < lo {
 		return lo

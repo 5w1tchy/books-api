@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/5w1tchy/books-api/internal/api/middlewares"
 	"github.com/5w1tchy/books-api/internal/metrics/viewqueue"
 	storebooks "github.com/5w1tchy/books-api/internal/store/books"
 )
@@ -25,12 +26,20 @@ func get(db *sql.DB) http.HandlerFunc {
 		}
 		w.Header().Set("Content-Type", "application/json")
 
+		// ADD AUTHENTICATION REQUIREMENT HERE
+		_, isAuth := middlewares.UserIDFrom(r.Context())
+		if !isAuth {
+			http.Error(w, `{"status":"error","error":"login required to read books"}`, http.StatusUnauthorized)
+			return
+		}
+
 		key := r.PathValue("key")
 		if key == "" {
 			http.Error(w, `{"status":"error","error":"missing key"}`, http.StatusBadRequest)
 			return
 		}
 
+		// ... rest of your existing code stays the same
 		// Load the public book
 		b, err := storebooks.FetchByKey(r.Context(), db, key)
 		if err == sql.ErrNoRows {

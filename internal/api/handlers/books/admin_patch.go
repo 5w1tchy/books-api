@@ -43,7 +43,7 @@ func AdminPatch(db *sql.DB, rdb *redis.Client) http.Handler {
 
 		// You'll need to implement this in sql_v2.go
 		b, err := storebooks.PatchV2(r.Context(), db, key, storebooks.UpdateBookV2DTO{
-			Code:       req.Coda,
+			Coda:       req.Coda,
 			Title:      req.Title,
 			Authors:    req.Authors,
 			Categories: req.Categories,

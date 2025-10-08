@@ -8,6 +8,7 @@ import (
 	"github.com/5w1tchy/books-api/internal/api/handlers/books"
 	"github.com/5w1tchy/books-api/internal/api/handlers/foryou"
 	"github.com/5w1tchy/books-api/internal/api/handlers/search"
+	"github.com/5w1tchy/books-api/internal/api/handlers/userbooks"
 	"github.com/5w1tchy/books-api/internal/api/middlewares"
 	"github.com/5w1tchy/books-api/internal/auth"
 	"github.com/redis/go-redis/v9"
@@ -49,6 +50,18 @@ func Router(db *sql.DB, rdb *redis.Client) http.Handler {
 	mux.Handle("GET /auth/me", middlewares.RequireAuth(db, http.HandlerFunc(authH.Me)))
 	mux.Handle("POST /auth/logout-all", middlewares.RequireAuth(db, http.HandlerFunc(authH.LogoutAll)))
 	mux.Handle("POST /auth/change-password", middlewares.RequireAuth(db, http.HandlerFunc(authH.ChangePassword)))
+
+	// User book features (require auth)
+	mux.Handle("POST /user/reading-progress", middlewares.RequireAuth(db, userbooks.UpdateProgress(db)))
+	mux.Handle("GET /user/reading-progress/{bookId}", middlewares.RequireAuth(db, userbooks.GetProgress(db)))
+	mux.Handle("GET /user/continue-reading", middlewares.RequireAuth(db, userbooks.ContinueReading(db)))
+
+	mux.Handle("POST /user/favorites/{bookId}", middlewares.RequireAuth(db, userbooks.AddFavorite(db)))
+	mux.Handle("DELETE /user/favorites/{bookId}", middlewares.RequireAuth(db, userbooks.RemoveFavorite(db)))
+	mux.Handle("GET /user/favorites", middlewares.RequireAuth(db, userbooks.GetFavorites(db)))
+
+	mux.Handle("POST /user/books/{bookId}/notes", middlewares.RequireAuth(db, userbooks.AddNote(db)))
+	mux.Handle("GET /user/books/{bookId}/notes", middlewares.RequireAuth(db, userbooks.GetNotes(db)))
 
 	// Email verification
 	verify := &auth.VerifyDeps{DB: db, RDB: rdb, BaseURL: ""}

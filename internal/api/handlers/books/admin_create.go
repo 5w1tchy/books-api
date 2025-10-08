@@ -3,6 +3,7 @@ package books
 import (
 	"database/sql"
 	"encoding/json"
+	"log"
 	"net/http"
 	"regexp"
 	"strings"
@@ -80,7 +81,7 @@ func AdminCreate(db *sql.DB, _ *redis.Client) http.Handler {
 		}
 
 		dto := storebooks.CreateBookV2DTO{
-			Code:       in.Coda,
+			Coda:       in.Coda,
 			Title:      in.Title,
 			Authors:    in.Authors,
 			Categories: in.Categories,
@@ -90,7 +91,7 @@ func AdminCreate(db *sql.DB, _ *redis.Client) http.Handler {
 
 		book, err := storebooks.CreateV2(r.Context(), db, dto)
 		if err != nil {
-			// unique code
+			log.Printf("[admin books] create error: %v", err) // <--- add this
 			if strings.Contains(strings.ToLower(err.Error()), "code_exists") {
 				http.Error(w, `{"status":"error","error":"coda already exists"}`, http.StatusConflict)
 				return
