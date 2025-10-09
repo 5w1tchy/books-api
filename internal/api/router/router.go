@@ -22,11 +22,17 @@ func Router(db *sql.DB, rdb *redis.Client) http.Handler {
 	mux.HandleFunc("GET /healthz", handlers.Healthz)
 	mux.HandleFunc("HEAD /healthz", handlers.Healthz)
 
-	// Books (READ-ONLY - public access)
-	mux.Handle("GET /books", books.Handler(db, rdb))        // list
-	mux.Handle("GET /books/{key}", books.Handler(db, rdb))  // get by key/code/slug
-	mux.Handle("HEAD /books/{key}", books.Handler(db, rdb)) // head
-	mux.Handle("OPTIONS /books", books.Handler(db, rdb))    // preflight
+	// Books
+	mux.Handle("GET /books", books.Handler(db, rdb)) // public list
+
+	// protect single book view
+	mux.Handle("GET /books/{key}", middlewares.RequireAuth(db, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		books.Handler(db, rdb).ServeHTTP(w, r)
+	})))
+	mux.Handle("HEAD /books/{key}", middlewares.RequireAuth(db, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		books.Handler(db, rdb).ServeHTTP(w, r)
+	})))
+	mux.Handle("OPTIONS /books", books.Handler(db, rdb))
 	mux.Handle("OPTIONS /books/{key}", books.Handler(db, rdb))
 
 	// Search
