@@ -10,7 +10,7 @@ type PublicBook struct {
 	ShortID       int      `json:"short_id"`
 	Slug          string   `json:"slug"`
 	Title         string   `json:"title"`
-	Author        string   `json:"author"`
+	Authors       []string `json:"author"`
 	CategorySlugs []string `json:"category_slugs"`
 	Summary       string   `json:"summary,omitempty"`
 	Short         string   `json:"short,omitempty"`
@@ -21,7 +21,7 @@ type PublicBook struct {
 type ListFilters struct {
 	Q          string
 	MinSim     float64
-	Author     string
+	Authors    []string
 	Categories []string
 	Match      string // "any" | "all"
 	Limit      int
@@ -30,13 +30,13 @@ type ListFilters struct {
 
 type CreateBookDTO struct {
 	Title         string   `json:"title"`
-	Author        string   `json:"author"`
+	Authors       []string `json:"authors"`
 	CategorySlugs []string `json:"categories,omitempty"`
 }
 
 type UpdateBookDTO struct {
 	Title         *string   `json:"title,omitempty"`
-	Author        *string   `json:"author,omitempty"`
+	Authors       *[]string `json:"authors,omitempty"`
 	CategorySlugs *[]string `json:"categories,omitempty"`
 }
 
