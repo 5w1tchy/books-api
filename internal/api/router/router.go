@@ -35,6 +35,9 @@ func Router(db *sql.DB, rdb *redis.Client) http.Handler {
 	mux.Handle("OPTIONS /books", books.Handler(db, rdb))
 	mux.Handle("OPTIONS /books/{key}", books.Handler(db, rdb))
 
+	// --- Book audio streaming (presigned download) ---
+	mux.Handle("GET /books/{key}/audio", books.GetBookAudioURLHandler(db))
+
 	// Search
 	mux.Handle("GET /search/suggest", search.Suggest(db))
 

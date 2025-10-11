@@ -40,9 +40,6 @@ func validateV2(dto CreateBookV2DTO) error {
 	if len(dto.Title) == 0 || len(dto.Title) > 200 {
 		return errors.New("title must be 1..200 chars")
 	}
-	if dto.Coda != "" && !codeRE.MatchString(dto.Coda) {
-		return errors.New("coda must match ^[a-z0-9-]{3,64}$")
-	}
 	if len(dto.Authors) < 1 || len(dto.Authors) > 20 {
 		return errors.New("authors must have 1..20 items")
 	}
@@ -103,8 +100,5 @@ func GenerateSlug(title string) string {
 
 // generateSlugFromDTO creates slug from DTO
 func generateSlugFromDTO(dto CreateBookV2DTO) string {
-	if dto.Coda != "" {
-		return strings.ToLower(dto.Coda)
-	}
 	return GenerateSlug(dto.Title)
 }

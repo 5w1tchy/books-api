@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -80,21 +79,4 @@ func list(db *sql.DB) http.HandlerFunc {
 		}
 		_ = json.NewEncoder(w).Encode(resp)
 	}
-}
-
-func parseInt(s string, def int) int {
-	if n, err := strconv.Atoi(s); err == nil {
-		return n
-	}
-	return def
-}
-
-func clamp(n, lo, hi int) int {
-	if n < lo {
-		return lo
-	}
-	if n > hi {
-		return hi
-	}
-	return n
 }
