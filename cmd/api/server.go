@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"crypto/tls"
 	"fmt"
 	"log"
@@ -11,7 +10,6 @@ import (
 
 	mw "github.com/5w1tchy/books-api/internal/api/middlewares"
 	"github.com/5w1tchy/books-api/internal/api/router"
-	"github.com/5w1tchy/books-api/internal/maintenance"
 	"github.com/5w1tchy/books-api/internal/metrics/viewqueue"
 	"github.com/5w1tchy/books-api/internal/repository/sqlconnect"
 	validatePkg "github.com/5w1tchy/books-api/internal/validate"
@@ -80,12 +78,6 @@ func main() {
 	for _, w := range validatePkg.HardeningWarnings(os.Getenv("APP_ENV")) {
 		log.Printf("WARN: %s", w)
 	}
-
-	// -------- Daily retention job for book_outputs (keep latest 5) ----------
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	maintenance.StartBookOutputsRetention(ctx, db, 5, "03:00", "Asia/Tbilisi")
-	// -----------------------------------------------------------------------
 
 	// -------- Rate limiting: token-bucket only ----------
 	tb := mw.NewRedisTokenBucket(rdb, 5, 20, mw.PerIPKey("tb"))

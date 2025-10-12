@@ -13,12 +13,11 @@ func BuildNewest(ctx context.Context, db *sql.DB, limit int, f Fields) ([]BookLi
 	const q = `
 SELECT b.id, b.slug, b.title, a.name,
        COALESCE(jsonb_agg(DISTINCT c.slug) FILTER (WHERE c.slug IS NOT NULL), '[]'::jsonb) AS slugs,
-       COALESCE(MAX(bo.summary), '') AS summary
+       COALESCE(b.summary, '') AS summary
 FROM books b
 JOIN authors a               ON a.id = b.author_id
 LEFT JOIN book_categories bc ON bc.book_id = b.id
 LEFT JOIN categories c       ON c.id = bc.category_id
-LEFT JOIN book_outputs bo    ON bo.book_id = b.id
 GROUP BY b.id, b.slug, b.title, a.name, b.created_at
 ORDER BY b.created_at DESC
 LIMIT $1;`

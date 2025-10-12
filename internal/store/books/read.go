@@ -11,7 +11,7 @@ import (
 	"github.com/5w1tchy/books-api/internal/store/shared"
 )
 
-// GetAdminBookByKey retrieves a book by ID
+// GetAdminBookByKey retrieves a book by ID or coda
 func GetAdminBookByKey(ctx context.Context, db *sql.DB, key string) (AdminBook, error) {
 	var book AdminBook
 	var query string
@@ -62,7 +62,6 @@ func ListAdminBooks(ctx context.Context, db *sql.DB, filter ListBooksFilter) ([]
 		filter.Size = 25
 	}
 
-	// Build query conditions
 	conditions, args := buildAdminListConditions(filter)
 
 	baseQuery := `
@@ -78,13 +77,11 @@ func ListAdminBooks(ctx context.Context, db *sql.DB, filter ListBooksFilter) ([]
 		whereClause = "WHERE " + strings.Join(conditions, " AND ")
 	}
 
-	// Count total
 	total, err := countAdminBooks(ctx, db, baseQuery, whereClause, args)
 	if err != nil {
 		return nil, 0, err
 	}
 
-	// Get books
 	books, err := fetchAdminBooks(ctx, db, baseQuery, whereClause, args, filter)
 	if err != nil {
 		return nil, 0, err
@@ -105,16 +102,15 @@ SELECT
     b.title,
     COALESCE(jsonb_agg(DISTINCT a.name) FILTER (WHERE a.name IS NOT NULL), '[]'::jsonb) AS authors,
     COALESCE(jsonb_agg(DISTINCT c.slug) FILTER (WHERE c.slug IS NOT NULL), '[]'::jsonb) AS cat_slugs,
-    COALESCE(bo.summary, '') AS summary,
-    COALESCE(bo.coda, '')    AS coda
+    COALESCE(b.summary, '') AS summary,
+    COALESCE(b.coda, '')    AS coda
 FROM books b
 LEFT JOIN book_authors ba ON ba.book_id = b.id
 LEFT JOIN authors a       ON a.id = ba.author_id
 LEFT JOIN book_categories bc ON bc.book_id = b.id
 LEFT JOIN categories c       ON c.id = bc.category_id
-LEFT JOIN book_outputs bo    ON bo.book_id = b.id
 WHERE ` + cond + `
-GROUP BY b.id, b.short_id, b.slug, b.title, bo.summary, bo.coda
+GROUP BY b.id, b.short_id, b.slug, b.title, b.summary, b.coda
 `
 
 	var pb PublicBook
@@ -128,7 +124,6 @@ GROUP BY b.id, b.short_id, b.slug, b.title, bo.summary, bo.coda
 		return PublicBook{}, err
 	}
 
-	// Decode authors and categories arrays
 	_ = json.Unmarshal(authorsJSON, &pb.Authors)
 	_ = json.Unmarshal(catsJSON, &pb.CategorySlugs)
 
@@ -207,7 +202,6 @@ func fetchAdminBooks(ctx context.Context, db *sql.DB, baseQuery, whereClause str
 			return nil, err
 		}
 
-		// Load relationships for each book
 		book.Authors, err = LoadAuthorsForBook(ctx, db, book.ID)
 		if err != nil {
 			return nil, err

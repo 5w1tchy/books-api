@@ -13,15 +13,14 @@ func BuildShorts(ctx context.Context, db *sql.DB, limit int, today, tomorrow tim
 	}
 
 	const qToday = `
-SELECT b.id, b.slug, b.title, a.name, bo.short::text AS short
-FROM book_outputs bo
-JOIN books b   ON b.id = bo.book_id
+SELECT b.id, b.slug, b.title, a.name, b.short::text AS short
+FROM books b
 JOIN authors a ON a.id = b.author_id
-WHERE bo.short_enabled
-  AND bo.short IS NOT NULL AND bo.short::text <> '""'
-  AND bo.short_last_featured_at >= $1
-  AND bo.short_last_featured_at <  $2
-ORDER BY bo.short_last_featured_at ASC, b.created_at DESC
+WHERE b.short_enabled
+  AND b.short IS NOT NULL AND b.short::text <> '""'
+  AND b.short_last_featured_at >= $1
+  AND b.short_last_featured_at <  $2
+ORDER BY b.short_last_featured_at ASC, b.created_at DESC
 LIMIT $3;`
 
 	var picks []shortPick
@@ -44,14 +43,13 @@ LIMIT $3;`
 		cutoff := today.Add(-featureCooldown)
 
 		const qEligible = `
-SELECT b.id, b.slug, b.title, a.name, bo.short::text AS short, bo.short_last_featured_at
-FROM book_outputs bo
-JOIN books b   ON b.id = bo.book_id
+SELECT b.id, b.slug, b.title, a.name, b.short::text AS short, b.short_last_featured_at
+FROM books b
 JOIN authors a ON a.id = b.author_id
-WHERE bo.short_enabled
-  AND bo.short IS NOT NULL AND bo.short::text <> '""'
-  AND (bo.short_last_featured_at IS NULL OR bo.short_last_featured_at < $1)
-ORDER BY bo.short_last_featured_at NULLS FIRST, b.created_at DESC
+WHERE b.short_enabled
+  AND b.short IS NOT NULL AND b.short::text <> '""'
+  AND (b.short_last_featured_at IS NULL OR b.short_last_featured_at < $1)
+ORDER BY b.short_last_featured_at NULLS FIRST, b.created_at DESC
 LIMIT $2;`
 
 		erows, err := db.QueryContext(ctx, qEligible, cutoff, missing*8)
@@ -79,14 +77,13 @@ LIMIT $2;`
 
 		if len(picks) < limit {
 			const qFallback = `
-SELECT b.id, b.slug, b.title, a.name, bo.short::text AS short
-FROM book_outputs bo
-JOIN books b   ON b.id = bo.book_id
+SELECT b.id, b.slug, b.title, a.name, b.short::text AS short
+FROM books b
 JOIN authors a ON a.id = b.author_id
-WHERE bo.short_enabled
-  AND bo.short IS NOT NULL AND bo.short::text <> '""'
-  AND bo.short_last_featured_at IS NOT NULL
-ORDER BY bo.short_last_featured_at ASC, b.created_at DESC
+WHERE b.short_enabled
+  AND b.short IS NOT NULL AND b.short::text <> '""'
+  AND b.short_last_featured_at IS NOT NULL
+ORDER BY b.short_last_featured_at ASC, b.created_at DESC
 LIMIT $1;`
 			frows, err := db.QueryContext(ctx, qFallback, (limit-len(picks))*8)
 			if err != nil {
@@ -111,22 +108,15 @@ LIMIT $1;`
 			}
 		}
 
-		// mark today's picks (update ONLY latest book_outputs row per book_id)
+		// mark today's picks
 		if len(picks) > 0 {
 			if tx, err := db.BeginTx(ctx, nil); err == nil {
 				ok := true
 				for _, p := range picks {
 					_, err2 := tx.ExecContext(ctx, `
-UPDATE book_outputs bo
+UPDATE books
 SET short_last_featured_at = $1
-FROM (
-  SELECT id
-  FROM book_outputs
-  WHERE book_id = $2
-  ORDER BY created_at DESC
-  LIMIT 1
-) latest
-WHERE bo.id = latest.id
+WHERE id = $2
 `, today, p.ID)
 					if err2 != nil {
 						_ = tx.Rollback()

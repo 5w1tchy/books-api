@@ -1,7 +1,6 @@
 package books
 
 import (
-	"regexp"
 	"time"
 )
 
@@ -39,8 +38,6 @@ type UpdateBookDTO struct {
 	Authors       *[]string `json:"authors,omitempty"`
 	CategorySlugs *[]string `json:"categories,omitempty"`
 }
-
-var codeRE = regexp.MustCompile(`^[a-z0-9-]{3,64}$`)
 
 // AdminBook is the rich shape returned by CreateV2.
 type AdminBook struct {

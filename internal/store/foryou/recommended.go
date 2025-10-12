@@ -36,13 +36,12 @@ recs AS (
   SELECT DISTINCT
     b.id, b.slug, b.title, a.name,
     COALESCE(jsonb_agg(DISTINCT c.slug) FILTER (WHERE c.slug IS NOT NULL), '[]'::jsonb) AS slugs,
-    COALESCE(MAX(bo.summary), '') AS summary,
+    COALESCE(b.summary, '') AS summary,
     MAX(b.created_at) AS newest
   FROM books b
   JOIN authors a          ON a.id = b.author_id
   JOIN book_categories bc ON bc.book_id = b.id
   JOIN categories c       ON c.id = bc.category_id
-  LEFT JOIN book_outputs bo ON bo.book_id = b.id
   WHERE c.id IN (SELECT cat_id FROM short_cats)
     AND b.id NOT IN (SELECT id FROM featured)
   GROUP BY b.id, b.slug, b.title, a.name

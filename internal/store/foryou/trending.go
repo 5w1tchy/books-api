@@ -13,18 +13,18 @@ func BuildTrending(ctx context.Context, db *sql.DB, limit int, f Fields) ([]Book
 	const q = `
 SELECT b.id, b.slug, b.title, a.name,
        COALESCE(jsonb_agg(DISTINCT c.slug) FILTER (WHERE c.slug IS NOT NULL), '[]'::jsonb) AS slugs,
-       COALESCE(MAX(bo.summary), '') AS summary
+       COALESCE(b.summary, '') AS summary
 FROM books b
 JOIN authors a               ON a.id = b.author_id
 LEFT JOIN book_categories bc ON bc.book_id = b.id
 LEFT JOIN categories c       ON c.id = bc.category_id
-LEFT JOIN book_outputs bo    ON bo.book_id = b.id
-WHERE bo.short IS NOT NULL
-  AND bo.short::text NOT IN ('', '""')
-  AND bo.short_enabled
-GROUP BY b.id, b.slug, b.title, a.name, bo.short_last_featured_at
-ORDER BY bo.short_last_featured_at DESC NULLS LAST, b.created_at DESC
+WHERE b.short IS NOT NULL
+  AND b.short::text NOT IN ('', '""')
+  AND b.short_enabled
+GROUP BY b.id, b.slug, b.title, a.name, b.short_last_featured_at
+ORDER BY b.short_last_featured_at DESC NULLS LAST, b.created_at DESC
 LIMIT $1;`
+
 	rows, err := db.QueryContext(ctx, q, limit)
 	if err != nil {
 		return nil, err

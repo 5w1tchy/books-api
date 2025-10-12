@@ -3,6 +3,7 @@ package books
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 
@@ -54,7 +55,8 @@ func AdminPatch(db *sql.DB, rdb *redis.Client) http.Handler {
 			http.Error(w, `{"status":"error","error":"not found"}`, http.StatusNotFound)
 			return
 		} else if err != nil {
-			http.Error(w, `{"status":"error","error":"failed to patch"}`, http.StatusInternalServerError)
+			log.Printf("[admin_patch] error while patching book %s: %v", key, err)
+			http.Error(w, fmt.Sprintf(`{"status":"error","error":"%v"}`, err), http.StatusInternalServerError)
 			return
 		}
 

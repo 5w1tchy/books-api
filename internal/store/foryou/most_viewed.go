@@ -23,14 +23,13 @@ SELECT
   b.title,
   a.name,
   COALESCE(jsonb_agg(DISTINCT c.slug) FILTER (WHERE c.slug IS NOT NULL), '[]'::jsonb) AS slugs,
-  COALESCE(MAX(bo.summary), '') AS summary,
+  COALESCE(b.summary, '') AS summary,
   v.views
 FROM views v
 JOIN books b               ON b.id = v.book_id
 JOIN authors a             ON a.id = b.author_id
 LEFT JOIN book_categories bc ON bc.book_id = b.id
 LEFT JOIN categories c        ON c.id = bc.category_id
-LEFT JOIN book_outputs bo     ON bo.book_id = b.id
 GROUP BY b.id, b.slug, b.title, a.name, v.views
 ORDER BY v.views DESC
 LIMIT $1;`
