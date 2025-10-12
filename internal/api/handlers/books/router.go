@@ -14,12 +14,12 @@ func Handler(db *sql.DB, _ *redis.Client) http.Handler {
 		switch r.Method {
 		case http.MethodGet:
 			if r.PathValue("key") != "" {
-				get(db)(w, r)
+				Get(db)(w, r)
 			} else {
 				list(db)(w, r)
 			}
 		case http.MethodHead:
-			head(db)(w, r)
+			Head(db)(w, r)
 		case http.MethodOptions:
 			w.WriteHeader(http.StatusNoContent)
 		default:

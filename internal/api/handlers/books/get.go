@@ -15,7 +15,7 @@ type bookWithContent struct {
 	Coda    *string `json:"coda,omitempty"`
 }
 
-func get(db *sql.DB) http.HandlerFunc {
+func Get(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)

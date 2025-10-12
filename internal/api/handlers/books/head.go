@@ -7,7 +7,7 @@ import (
 	storebooks "github.com/5w1tchy/books-api/internal/store/books"
 )
 
-func head(db *sql.DB) http.HandlerFunc {
+func Head(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodHead {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)

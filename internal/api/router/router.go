@@ -24,15 +24,11 @@ func Router(db *sql.DB, rdb *redis.Client) http.Handler {
 
 	// Books
 	mux.Handle("GET /books", books.Handler(db, rdb)) // public list
-
-	// protect single book view
-	mux.Handle("GET /books/{key}", middlewares.RequireAuth(db, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		books.Handler(db, rdb).ServeHTTP(w, r)
-	})))
-	mux.Handle("HEAD /books/{key}", middlewares.RequireAuth(db, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		books.Handler(db, rdb).ServeHTTP(w, r)
-	})))
 	mux.Handle("OPTIONS /books", books.Handler(db, rdb))
+
+	// Protected single-book view
+	mux.Handle("GET /books/{key}", middlewares.RequireAuth(db, books.Get(db)))
+	mux.Handle("HEAD /books/{key}", middlewares.RequireAuth(db, books.Head(db)))
 	mux.Handle("OPTIONS /books/{key}", books.Handler(db, rdb))
 
 	// --- Book audio streaming (presigned download) ---
