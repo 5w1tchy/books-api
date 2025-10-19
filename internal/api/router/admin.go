@@ -48,6 +48,11 @@ func MountAdmin(mux *http.ServeMux, db *sql.DB, rdb *redis.Client) {
 		gate(http.HandlerFunc(books.GenerateBookAudioURLHandler(db))),
 	)
 
+	// --- Admin Book Cover Upload ---
+	mux.Handle("POST /admin/books/{key}/cover",
+		gate(http.HandlerFunc(books.UploadBookCoverHandler(db))),
+	)
+
 	// --- Admin autocomplete endpoints ---
 	mux.Handle("GET /admin/categories", gate(books.AdminGetCategories(db, rdb)))
 	mux.Handle("GET /admin/authors", gate(books.AdminGetAuthors(db, rdb)))

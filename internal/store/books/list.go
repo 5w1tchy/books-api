@@ -37,7 +37,6 @@ EXISTS (
   JOIN categories c2 ON c2.id = bc2.category_id
   WHERE bc2.book_id = b.id AND c2.slug = ANY($`+strconv.Itoa(i)+`::text[])
 )`)
-
 		} else {
 			where = append(where, `
 (
@@ -70,7 +69,7 @@ EXISTS (
     )
   OR GREATEST(
        similarity(public.immutable_unaccent(lower(b.title)), public.immutable_unaccent(lower($`+strconv.Itoa(qIdx)+`))),
-       (SELECT MAX(similarity(public.immutable_unaccent(lower(a2.name)), public.immutable_unaccent(lower($`+strconv.Itoa(qIdx)+`))))
+       (SELECT MAX(similarity(public.immutable_unaccent(lower(a2.name)), public.immutable_unaccent(lower($`+strconv.Itoa(qIdx)+`)) ))
         FROM authors a2 JOIN book_authors ba2 ON a2.id = ba2.author_id WHERE ba2.book_id = b.id)
      ) >= $`+strconv.Itoa(minIdx)+`
 )`)
@@ -97,7 +96,8 @@ SELECT
   b.slug,
   b.title,
   COALESCE(jsonb_agg(DISTINCT a.name) FILTER (WHERE a.name IS NOT NULL), '[]'::jsonb) AS authors,
-  COALESCE(jsonb_agg(DISTINCT c_all.slug) FILTER (WHERE c_all.slug IS NOT NULL), '[]'::jsonb) AS categories
+  COALESCE(jsonb_agg(DISTINCT c_all.slug) FILTER (WHERE c_all.slug IS NOT NULL), '[]'::jsonb) AS categories,
+  b.cover_url
 FROM books b
 LEFT JOIN book_authors ba ON ba.book_id = b.id
 LEFT JOIN authors a ON a.id = ba.author_id
@@ -108,9 +108,8 @@ LEFT JOIN categories c_all ON c_all.id = bc1.category_id
 		qRows += "WHERE " + strings.Join(where, " AND ") + "\n"
 	}
 	qRows += `
-GROUP BY b.id, b.short_id, b.slug, b.title
+GROUP BY b.id, b.short_id, b.slug, b.title, b.cover_url
 `
-	// ranking when q present; else recency
 	if qIdx != -1 {
 		qRows += `
 ORDER BY GREATEST(
@@ -120,7 +119,6 @@ ORDER BY GREATEST(
 	} else {
 		qRows += "ORDER BY b.created_at DESC\n"
 	}
-	// limit/offset
 	qRows += "LIMIT $" + strconv.Itoa(i) + " OFFSET $" + strconv.Itoa(i+1)
 
 	rows, err := db.QueryContext(ctx, qRows, append(args, f.Limit, f.Offset)...)
@@ -133,7 +131,7 @@ ORDER BY GREATEST(
 	for rows.Next() {
 		var pb PublicBook
 		var authorsJSON, catsJSON []byte
-		if err := rows.Scan(&pb.ID, &pb.ShortID, &pb.Slug, &pb.Title, &authorsJSON, &catsJSON); err != nil {
+		if err := rows.Scan(&pb.ID, &pb.ShortID, &pb.Slug, &pb.Title, &authorsJSON, &catsJSON, &pb.CoverURL); err != nil {
 			return nil, 0, err
 		}
 		_ = json.Unmarshal(authorsJSON, &pb.Authors)

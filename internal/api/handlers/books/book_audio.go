@@ -13,7 +13,7 @@ import (
 func GetBookAudioURLHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
-		bookKey := r.PathValue("key") // using Go 1.22+ routing
+		bookKey := r.PathValue("key")
 
 		var objectKey string
 		err := db.QueryRowContext(ctx, `

@@ -23,7 +23,7 @@ func Router(db *sql.DB, rdb *redis.Client) http.Handler {
 	mux.HandleFunc("HEAD /healthz", handlers.Healthz)
 
 	// Books
-	mux.Handle("GET /books", books.Handler(db, rdb)) // public list
+	mux.Handle("GET /books", books.Handler(db, rdb))
 	mux.Handle("OPTIONS /books", books.Handler(db, rdb))
 
 	// Protected single-book view

@@ -18,7 +18,10 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-const maxAudioSize = 200 << 20 // 200 MB
+const (
+	maxAudioSize = 200 << 20 // 200 MB
+	maxCoverSize = 10 << 20  // 10 MB
+)
 
 var allowedAudioC = map[string]bool{
 	"audio/mpeg":  true,
@@ -27,6 +30,13 @@ var allowedAudioC = map[string]bool{
 	"audio/ogg":   true,
 	"audio/wav":   true,
 	"audio/x-wav": true,
+}
+
+var allowedCoverC = map[string]bool{
+	"image/jpeg": true,
+	"image/jpg":  true,
+	"image/png":  true,
+	"image/webp": true,
 }
 
 // === Request / Response ===
@@ -45,6 +55,8 @@ type adminCreateResp struct {
 	Data     storebooks.AdminBook `json:"data"`
 	AudioKey string               `json:"audio_key,omitempty"`
 	AudioURL string               `json:"audio_url,omitempty"`
+	CoverKey string               `json:"cover_key,omitempty"`
+	CoverURL string               `json:"cover_url,omitempty"`
 }
 
 // === Handler ===
@@ -57,20 +69,26 @@ func AdminCreate(db *sql.DB, _ *redis.Client) http.Handler {
 		}
 
 		var (
-			in          adminCreateReq
-			ctx         = r.Context()
-			audioFound  bool
-			audioKey    string
-			audioURL    string
-			audioSize   int64
-			contentType string
-			file        multipart.File
-			r2client    *storage.S3Client
+			in               adminCreateReq
+			ctx              = r.Context()
+			audioFound       bool
+			coverFound       bool
+			audioKey         string
+			coverKey         string
+			audioURL         string
+			coverURL         string
+			audioSize        int64
+			coverSize        int64
+			audioContentType string
+			coverContentType string
+			audioFile        multipart.File
+			coverFile        multipart.File
+			r2client         *storage.S3Client
 		)
 
 		ct := r.Header.Get("Content-Type")
 		if strings.HasPrefix(ct, "multipart/form-data") {
-			// multipart path (supports optional audio)
+			// multipart path (supports optional audio and cover)
 			if err := r.ParseMultipartForm(32 << 20); err != nil {
 				httpx.ErrorJSON(w, http.StatusBadRequest, "invalid multipart form")
 				return
@@ -82,15 +100,23 @@ func AdminCreate(db *sql.DB, _ *redis.Client) http.Handler {
 			in.Authors = normalizeSlice(r.Form["authors"])
 			in.Categories = normalizeSlice(r.Form["categories"])
 
-			f, hdr, err := r.FormFile("audio")
-			if err == nil {
-				file = f
+			// Handle audio file
+			if f, hdr, err := r.FormFile("audio"); err == nil {
+				audioFile = f
 				audioFound = true
 				audioSize = hdr.Size
-				contentType = hdr.Header.Get("Content-Type")
+				audioContentType = hdr.Header.Get("Content-Type")
+			}
+
+			// Handle cover file
+			if f, hdr, err := r.FormFile("cover"); err == nil {
+				coverFile = f
+				coverFound = true
+				coverSize = hdr.Size
+				coverContentType = hdr.Header.Get("Content-Type")
 			}
 		} else {
-			// JSON path (no audio)
+			// JSON path (no files)
 			if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 				httpx.ErrorJSON(w, http.StatusBadRequest, "invalid JSON")
 				return
@@ -125,7 +151,18 @@ func AdminCreate(db *sql.DB, _ *redis.Client) http.Handler {
 			return
 		}
 
-		// if audio present: checks & upload via presigned PUT (server-side)
+		// Initialize R2 client if we have any files
+		if audioFound || coverFound {
+			var err error
+			r2client, err = storage.NewR2Client(ctx)
+			if err != nil {
+				log.Printf("[admin books] r2 init error: %v", err)
+				httpx.ErrorJSON(w, http.StatusInternalServerError, "storage client init failed")
+				return
+			}
+		}
+
+		// Handle audio upload
 		if audioFound {
 			if audioSize > maxAudioSize {
 				httpx.ErrorJSON(w, http.StatusBadRequest, "audio too large")
@@ -133,24 +170,24 @@ func AdminCreate(db *sql.DB, _ *redis.Client) http.Handler {
 			}
 
 			// sniff if missing
-			if contentType == "" {
+			if audioContentType == "" {
 				head := make([]byte, 512)
-				n, _ := file.Read(head)
-				_, _ = file.Seek(0, io.SeekStart)
-				contentType = http.DetectContentType(head[:n])
+				n, _ := audioFile.Read(head)
+				_, _ = audioFile.Seek(0, io.SeekStart)
+				audioContentType = http.DetectContentType(head[:n])
 			}
-			if !allowedAudioC[contentType] {
+			if !allowedAudioC[audioContentType] {
 				httpx.ErrorJSON(w, http.StatusBadRequest, "unsupported audio content type")
 				return
 			}
 
-			// build object key from TITLE (slugify for a safe path); do NOT use coda (free text)
+			// build object key from TITLE (slugify for a safe path)
 			safe := slugifyTitle(in.Title)
 			if safe == "" {
 				safe = fmt.Sprintf("book-%d", time.Now().UnixNano())
 			}
 			ext := ".mp3"
-			switch contentType {
+			switch audioContentType {
 			case "audio/ogg":
 				ext = ".ogg"
 			case "audio/mp4":
@@ -160,25 +197,74 @@ func AdminCreate(db *sql.DB, _ *redis.Client) http.Handler {
 			}
 			audioKey = path.Join("books", fmt.Sprintf("%s-audio-%d%s", safe, time.Now().Unix(), ext))
 
-			var err error
-			r2client, err = storage.NewR2Client(ctx)
-			if err != nil {
-				log.Printf("[admin books] r2 init error: %v", err)
-				httpx.ErrorJSON(w, http.StatusInternalServerError, "storage client init failed")
-				return
-			}
-
-			// IMPORTANT: pass contentLength to avoid 411 MissingContentLength
-			if err := uploadFileToR2(ctx, r2client, audioKey, file, contentType, audioSize); err != nil {
+			if err := uploadFileToR2(ctx, r2client, audioKey, audioFile, audioContentType, audioSize); err != nil {
 				log.Printf("[admin books] audio upload error: %v", err)
 				httpx.ErrorJSON(w, http.StatusInternalServerError, fmt.Sprintf("audio upload failed: %v", err))
 				return
 			}
-			_ = file.Close()
+			_ = audioFile.Close()
 
 			// optional presigned GET for immediate preview
 			if url, err := r2client.GeneratePresignedDownloadURL(ctx, audioKey); err == nil {
 				audioURL = url
+			}
+		}
+
+		// Handle cover upload
+		if coverFound {
+			if coverSize > maxCoverSize {
+				// Cleanup audio if already uploaded
+				if audioFound && r2client != nil && audioKey != "" {
+					_ = r2client.DeleteObject(ctx, audioKey)
+				}
+				httpx.ErrorJSON(w, http.StatusBadRequest, "cover too large (max 10MB)")
+				return
+			}
+
+			// sniff if missing
+			if coverContentType == "" {
+				head := make([]byte, 512)
+				n, _ := coverFile.Read(head)
+				_, _ = coverFile.Seek(0, io.SeekStart)
+				coverContentType = http.DetectContentType(head[:n])
+			}
+			if !allowedCoverC[coverContentType] {
+				// Cleanup audio if already uploaded
+				if audioFound && r2client != nil && audioKey != "" {
+					_ = r2client.DeleteObject(ctx, audioKey)
+				}
+				httpx.ErrorJSON(w, http.StatusBadRequest, "unsupported cover type (use jpeg, png, or webp)")
+				return
+			}
+
+			// build object key: books/covers/<slug>-<timestamp>.<ext>
+			safe := slugifyTitle(in.Title)
+			if safe == "" {
+				safe = fmt.Sprintf("book-%d", time.Now().UnixNano())
+			}
+			ext := ".jpg"
+			switch coverContentType {
+			case "image/png":
+				ext = ".png"
+			case "image/webp":
+				ext = ".webp"
+			}
+			coverKey = path.Join("books/covers", fmt.Sprintf("%s-%d%s", safe, time.Now().Unix(), ext))
+
+			if err := uploadFileToR2(ctx, r2client, coverKey, coverFile, coverContentType, coverSize); err != nil {
+				log.Printf("[admin books] cover upload error: %v", err)
+				// Cleanup audio if already uploaded
+				if audioFound && r2client != nil && audioKey != "" {
+					_ = r2client.DeleteObject(ctx, audioKey)
+				}
+				httpx.ErrorJSON(w, http.StatusInternalServerError, fmt.Sprintf("cover upload failed: %v", err))
+				return
+			}
+			_ = coverFile.Close()
+
+			// optional presigned GET for immediate preview
+			if url, err := r2client.GeneratePresignedDownloadURL(ctx, coverKey); err == nil {
+				coverURL = url
 			}
 		}
 
@@ -195,9 +281,14 @@ func AdminCreate(db *sql.DB, _ *redis.Client) http.Handler {
 		book, err := storebooks.CreateV2(ctx, db, dto)
 		if err != nil {
 			log.Printf("[admin books] create error: %v", err)
-			// cleanup uploaded file if create fails
-			if audioFound && r2client != nil && audioKey != "" {
-				_ = r2client.DeleteObject(ctx, audioKey)
+			// cleanup uploaded files if create fails
+			if r2client != nil {
+				if audioKey != "" {
+					_ = r2client.DeleteObject(ctx, audioKey)
+				}
+				if coverKey != "" {
+					_ = r2client.DeleteObject(ctx, coverKey)
+				}
 			}
 			if strings.Contains(strings.ToLower(err.Error()), "code_exists") {
 				httpx.ErrorJSON(w, http.StatusConflict, "coda already exists")
@@ -207,19 +298,42 @@ func AdminCreate(db *sql.DB, _ *redis.Client) http.Handler {
 			return
 		}
 
-		// attach audio to the created row (books.audio_key is NULLABLE as you set)
-		if audioFound && audioKey != "" {
-			_, err := db.ExecContext(ctx, `
-				UPDATE books
-				SET audio_key = $1
-				WHERE id = $2
-			`, audioKey, book.ID)
+		// attach audio and cover to the created row
+		if audioKey != "" || coverKey != "" {
+			query := `UPDATE books SET `
+			args := []interface{}{}
+			argIdx := 1
+
+			if audioKey != "" {
+				query += fmt.Sprintf("audio_key = $%d", argIdx)
+				args = append(args, audioKey)
+				argIdx++
+			}
+
+			if coverKey != "" {
+				if audioKey != "" {
+					query += ", "
+				}
+				query += fmt.Sprintf("cover_url = $%d", argIdx)
+				args = append(args, coverKey)
+				argIdx++
+			}
+
+			query += fmt.Sprintf(" WHERE id = $%d", argIdx)
+			args = append(args, book.ID)
+
+			_, err := db.ExecContext(ctx, query, args...)
 			if err != nil {
 				if r2client != nil {
-					_ = r2client.DeleteObject(ctx, audioKey)
+					if audioKey != "" {
+						_ = r2client.DeleteObject(ctx, audioKey)
+					}
+					if coverKey != "" {
+						_ = r2client.DeleteObject(ctx, coverKey)
+					}
 				}
-				log.Printf("[admin books] attach audio failed: %v", err)
-				httpx.ErrorJSON(w, http.StatusInternalServerError, "failed to attach audio to book")
+				log.Printf("[admin books] attach files failed: %v", err)
+				httpx.ErrorJSON(w, http.StatusInternalServerError, "failed to attach files to book")
 				return
 			}
 		}
@@ -229,6 +343,8 @@ func AdminCreate(db *sql.DB, _ *redis.Client) http.Handler {
 			Data:     book,
 			AudioKey: audioKey,
 			AudioURL: audioURL,
+			CoverKey: coverKey,
+			CoverURL: coverURL,
 		}
 		httpx.WriteJSON(w, http.StatusOK, resp)
 	})

@@ -8,7 +8,7 @@ import (
 // DeleteV2 deletes a book and its relationships
 func DeleteV2(ctx context.Context, db *sql.DB, key string) error {
 	// First get the book ID to ensure it exists
-	existing, err := GetAdminBookByKey(ctx, db, key)
+	existing, err := GetAdminBookByID(ctx, db, key)
 	if err != nil {
 		return err
 	}

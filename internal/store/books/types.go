@@ -15,6 +15,7 @@ type PublicBook struct {
 	Short         string   `json:"short,omitempty"`
 	Coda          string   `json:"coda,omitempty"`
 	URL           string   `json:"url"`
+	CoverURL      *string  `json:"cover_url,omitempty"`
 }
 
 type ListFilters struct {
@@ -27,18 +28,6 @@ type ListFilters struct {
 	Offset     int
 }
 
-type CreateBookDTO struct {
-	Title         string   `json:"title"`
-	Authors       []string `json:"authors"`
-	CategorySlugs []string `json:"categories,omitempty"`
-}
-
-type UpdateBookDTO struct {
-	Title         *string   `json:"title,omitempty"`
-	Authors       *[]string `json:"authors,omitempty"`
-	CategorySlugs *[]string `json:"categories,omitempty"`
-}
-
 // AdminBook is the rich shape returned by CreateV2.
 type AdminBook struct {
 	ID         string    `json:"id"`
@@ -49,15 +38,17 @@ type AdminBook struct {
 	Short      string    `json:"short,omitempty"`
 	Summary    string    `json:"summary,omitempty"`
 	CreatedAt  time.Time `json:"created_at"`
+	CoverURL   *string   `json:"cover_url,omitempty"`
 }
 
 type CreateBookV2DTO struct {
 	Coda       string
 	Title      string
-	Authors    []string // names
-	Categories []string // names
+	Authors    []string
+	Categories []string
 	Short      string
 	Summary    string
+	CoverURL   *string
 }
 
 type UpdateBookV2DTO struct {
@@ -67,6 +58,7 @@ type UpdateBookV2DTO struct {
 	Categories *[]string `json:"categories,omitempty"`
 	Short      *string   `json:"short,omitempty"`
 	Summary    *string   `json:"summary,omitempty"`
+	CoverURL   *string   `json:"cover_url,omitempty"`
 }
 
 type ListBooksFilter struct {

@@ -47,10 +47,17 @@ func insertBook(ctx context.Context, tx *sql.Tx, dto CreateBookV2DTO) (AdminBook
 	var createdAt time.Time
 
 	err := tx.QueryRowContext(ctx, `
-        INSERT INTO books (coda, title, slug, short, summary)
-        VALUES ($1, $2, $3, $4, $5)
+        INSERT INTO books (coda, title, slug, short, summary, cover_url)
+        VALUES ($1, $2, $3, $4, $5, $6)
         RETURNING id::text, created_at
-    `, NullIfEmpty(dto.Coda), dto.Title, slug, NullIfEmpty(dto.Short), NullIfEmpty(dto.Summary)).Scan(&bookID, &createdAt)
+    `,
+		NullIfEmpty(dto.Coda),
+		dto.Title,
+		slug,
+		NullIfEmpty(dto.Short),
+		NullIfEmpty(dto.Summary),
+		dto.CoverURL, // ✅ added
+	).Scan(&bookID, &createdAt)
 
 	if err != nil {
 		if IsUniqueViolation(err) {
@@ -67,6 +74,7 @@ func insertBook(ctx context.Context, tx *sql.Tx, dto CreateBookV2DTO) (AdminBook
 		Categories: Dedup(dto.Categories),
 		Short:      dto.Short,
 		Summary:    dto.Summary,
+		CoverURL:   dto.CoverURL,
 		CreatedAt:  createdAt,
 	}, nil
 }

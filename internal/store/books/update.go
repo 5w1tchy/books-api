@@ -14,7 +14,7 @@ func ReplaceV2(ctx context.Context, db *sql.DB, key string, dto CreateBookV2DTO)
 	}
 
 	// First get the book ID
-	existing, err := GetAdminBookByKey(ctx, db, key)
+	existing, err := GetAdminBookByID(ctx, db, key)
 	if err != nil {
 		return AdminBook{}, err
 	}
@@ -63,7 +63,7 @@ func ReplaceV2(ctx context.Context, db *sql.DB, key string, dto CreateBookV2DTO)
 // PatchV2 partially updates a book
 func PatchV2(ctx context.Context, db *sql.DB, key string, dto UpdateBookV2DTO) (AdminBook, error) {
 	// First get current book
-	current, err := GetAdminBookByKey(ctx, db, key)
+	current, err := GetAdminBookByID(ctx, db, key)
 	if err != nil {
 		return AdminBook{}, err
 	}

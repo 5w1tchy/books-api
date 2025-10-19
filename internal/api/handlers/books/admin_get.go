@@ -24,7 +24,7 @@ func AdminGet(db *sql.DB, rdb *redis.Client) http.Handler {
 			return
 		}
 
-		book, err := storebooks.GetAdminBookByKey(r.Context(), db, key)
+		book, err := storebooks.GetAdminBookByID(r.Context(), db, key)
 		if err == sql.ErrNoRows {
 			http.Error(w, `{"status":"error","error":"not found"}`, http.StatusNotFound)
 			return

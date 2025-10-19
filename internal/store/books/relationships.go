@@ -53,15 +53,26 @@ func upsertAuthor(ctx context.Context, tx *sql.Tx, name string) (string, error) 
 	slug := strings.ToLower(GenerateSlug(name))
 
 	var id string
+	// Step 1: try to find existing author by name
 	err := tx.QueryRowContext(ctx, `
+        SELECT id::text FROM authors WHERE name = $1 LIMIT 1
+    `, name).Scan(&id)
+
+	if err == nil {
+		return id, nil // author exists — return its ID
+	}
+	if err != sql.ErrNoRows {
+		return "", fmt.Errorf("failed to lookup author '%s': %w", name, err)
+	}
+
+	// Step 2: insert new one if not found
+	err = tx.QueryRowContext(ctx, `
         INSERT INTO authors (name, slug)
         VALUES ($1, $2)
-        ON CONFLICT (name) DO UPDATE SET slug = EXCLUDED.slug
         RETURNING id::text
     `, name, slug).Scan(&id)
-
 	if err != nil {
-		return "", fmt.Errorf("failed to create/lookup author '%s': %w", name, err)
+		return "", fmt.Errorf("failed to create author '%s': %w", name, err)
 	}
 
 	return id, nil
@@ -72,15 +83,26 @@ func upsertCategory(ctx context.Context, tx *sql.Tx, name string) (string, error
 	slug := strings.ToLower(GenerateSlug(name))
 
 	var id string
+	// Step 1: try to find existing category by name
 	err := tx.QueryRowContext(ctx, `
+        SELECT id::text FROM categories WHERE name = $1 LIMIT 1
+    `, name).Scan(&id)
+
+	if err == nil {
+		return id, nil // category already exists
+	}
+	if err != sql.ErrNoRows {
+		return "", fmt.Errorf("failed to lookup category '%s': %w", name, err)
+	}
+
+	// Step 2: insert new one if not found
+	err = tx.QueryRowContext(ctx, `
         INSERT INTO categories (name, slug)
         VALUES ($1, $2)
-        ON CONFLICT (name) DO UPDATE SET slug = EXCLUDED.slug
         RETURNING id::text
     `, name, slug).Scan(&id)
-
 	if err != nil {
-		return "", fmt.Errorf("failed to create/lookup category '%s': %w", name, err)
+		return "", fmt.Errorf("failed to create category '%s': %w", name, err)
 	}
 
 	return id, nil
