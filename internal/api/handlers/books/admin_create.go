@@ -100,20 +100,26 @@ func AdminCreate(db *sql.DB, _ *redis.Client) http.Handler {
 			in.Authors = normalizeSlice(r.Form["authors"])
 			in.Categories = normalizeSlice(r.Form["categories"])
 
-			// Handle audio file
+			// Handle audio file - WITH DEBUG LOGGING
 			if f, hdr, err := r.FormFile("audio"); err == nil {
+				log.Printf("🎵 Audio file received: %s, size: %d bytes, type: %s", hdr.Filename, hdr.Size, hdr.Header.Get("Content-Type"))
 				audioFile = f
 				audioFound = true
 				audioSize = hdr.Size
 				audioContentType = hdr.Header.Get("Content-Type")
+			} else {
+				log.Printf("⚠️ No audio file in form: %v", err)
 			}
 
-			// Handle cover file
+			// Handle cover file - WITH DEBUG LOGGING
 			if f, hdr, err := r.FormFile("cover"); err == nil {
+				log.Printf("🖼️ Cover file received: %s, size: %d bytes, type: %s", hdr.Filename, hdr.Size, hdr.Header.Get("Content-Type"))
 				coverFile = f
 				coverFound = true
 				coverSize = hdr.Size
 				coverContentType = hdr.Header.Get("Content-Type")
+			} else {
+				log.Printf("⚠️ No cover file in form: %v", err)
 			}
 		} else {
 			// JSON path (no files)
@@ -153,6 +159,7 @@ func AdminCreate(db *sql.DB, _ *redis.Client) http.Handler {
 
 		// Initialize R2 client if we have any files
 		if audioFound || coverFound {
+			log.Printf("🔧 Initializing R2 client (audioFound=%v, coverFound=%v)", audioFound, coverFound)
 			var err error
 			r2client, err = storage.NewR2Client(ctx)
 			if err != nil {
@@ -160,10 +167,12 @@ func AdminCreate(db *sql.DB, _ *redis.Client) http.Handler {
 				httpx.ErrorJSON(w, http.StatusInternalServerError, "storage client init failed")
 				return
 			}
+			log.Printf("✅ R2 client initialized successfully")
 		}
 
 		// Handle audio upload
 		if audioFound {
+			log.Printf("📤 Starting audio upload...")
 			if audioSize > maxAudioSize {
 				httpx.ErrorJSON(w, http.StatusBadRequest, "audio too large")
 				return
@@ -177,6 +186,7 @@ func AdminCreate(db *sql.DB, _ *redis.Client) http.Handler {
 				audioContentType = http.DetectContentType(head[:n])
 			}
 			if !allowedAudioC[audioContentType] {
+				log.Printf("❌ Unsupported audio type: %s", audioContentType)
 				httpx.ErrorJSON(w, http.StatusBadRequest, "unsupported audio content type")
 				return
 			}
@@ -196,6 +206,7 @@ func AdminCreate(db *sql.DB, _ *redis.Client) http.Handler {
 				ext = ".wav"
 			}
 			audioKey = path.Join("books", fmt.Sprintf("%s-audio-%d%s", safe, time.Now().Unix(), ext))
+			log.Printf("📝 Audio key: %s", audioKey)
 
 			if err := uploadFileToR2(ctx, r2client, audioKey, audioFile, audioContentType, audioSize); err != nil {
 				log.Printf("[admin books] audio upload error: %v", err)
@@ -203,15 +214,18 @@ func AdminCreate(db *sql.DB, _ *redis.Client) http.Handler {
 				return
 			}
 			_ = audioFile.Close()
+			log.Printf("✅ Audio uploaded successfully to R2")
 
 			// optional presigned GET for immediate preview
 			if url, err := r2client.GeneratePresignedDownloadURL(ctx, audioKey); err == nil {
 				audioURL = url
+				log.Printf("🔗 Audio presigned URL generated")
 			}
 		}
 
 		// Handle cover upload
 		if coverFound {
+			log.Printf("📤 Starting cover upload...")
 			if coverSize > maxCoverSize {
 				// Cleanup audio if already uploaded
 				if audioFound && r2client != nil && audioKey != "" {
@@ -233,6 +247,7 @@ func AdminCreate(db *sql.DB, _ *redis.Client) http.Handler {
 				if audioFound && r2client != nil && audioKey != "" {
 					_ = r2client.DeleteObject(ctx, audioKey)
 				}
+				log.Printf("❌ Unsupported cover type: %s", coverContentType)
 				httpx.ErrorJSON(w, http.StatusBadRequest, "unsupported cover type (use jpeg, png, or webp)")
 				return
 			}
@@ -250,6 +265,7 @@ func AdminCreate(db *sql.DB, _ *redis.Client) http.Handler {
 				ext = ".webp"
 			}
 			coverKey = path.Join("books/covers", fmt.Sprintf("%s-%d%s", safe, time.Now().Unix(), ext))
+			log.Printf("📝 Cover key: %s", coverKey)
 
 			if err := uploadFileToR2(ctx, r2client, coverKey, coverFile, coverContentType, coverSize); err != nil {
 				log.Printf("[admin books] cover upload error: %v", err)
@@ -261,10 +277,12 @@ func AdminCreate(db *sql.DB, _ *redis.Client) http.Handler {
 				return
 			}
 			_ = coverFile.Close()
+			log.Printf("✅ Cover uploaded successfully to R2")
 
 			// optional presigned GET for immediate preview
 			if url, err := r2client.GeneratePresignedDownloadURL(ctx, coverKey); err == nil {
 				coverURL = url
+				log.Printf("🔗 Cover presigned URL generated")
 			}
 		}
 
@@ -278,6 +296,7 @@ func AdminCreate(db *sql.DB, _ *redis.Client) http.Handler {
 			Summary:    in.Summary,
 		}
 
+		log.Printf("📚 Creating book in database...")
 		book, err := storebooks.CreateV2(ctx, db, dto)
 		if err != nil {
 			log.Printf("[admin books] create error: %v", err)
@@ -297,9 +316,11 @@ func AdminCreate(db *sql.DB, _ *redis.Client) http.Handler {
 			httpx.ErrorJSON(w, http.StatusInternalServerError, "failed to create book")
 			return
 		}
+		log.Printf("✅ Book created in database with ID: %v", book.ID)
 
 		// attach audio and cover to the created row
 		if audioKey != "" || coverKey != "" {
+			log.Printf("🔗 Attaching files to book (audioKey=%s, coverKey=%s)", audioKey, coverKey)
 			query := `UPDATE books SET `
 			args := []interface{}{}
 			argIdx := 1
@@ -322,6 +343,7 @@ func AdminCreate(db *sql.DB, _ *redis.Client) http.Handler {
 			query += fmt.Sprintf(" WHERE id = $%d", argIdx)
 			args = append(args, book.ID)
 
+			log.Printf("🔍 SQL Query: %s with args: %v", query, args)
 			_, err := db.ExecContext(ctx, query, args...)
 			if err != nil {
 				if r2client != nil {
@@ -336,6 +358,7 @@ func AdminCreate(db *sql.DB, _ *redis.Client) http.Handler {
 				httpx.ErrorJSON(w, http.StatusInternalServerError, "failed to attach files to book")
 				return
 			}
+			log.Printf("✅ Files attached successfully to database")
 		}
 
 		resp := adminCreateResp{
@@ -346,6 +369,7 @@ func AdminCreate(db *sql.DB, _ *redis.Client) http.Handler {
 			CoverKey: coverKey,
 			CoverURL: coverURL,
 		}
+		log.Printf("🎉 Book creation complete! Returning response")
 		httpx.WriteJSON(w, http.StatusOK, resp)
 	})
 }

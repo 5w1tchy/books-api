@@ -91,3 +91,54 @@ func UploadBookCoverHandler(db *sql.DB) http.HandlerFunc {
 		})
 	}
 }
+
+// GET /books/{key}/cover - Redirects to presigned cover URL (just like audio)
+func GetBookCoverURLHandler(db *sql.DB) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+		key := r.PathValue("key")
+
+		if key == "" {
+			http.Error(w, `{"error":"missing book key"}`, http.StatusBadRequest)
+			return
+		}
+
+		// Get cover_url from database
+		var coverURL sql.NullString
+		err := db.QueryRowContext(ctx, `
+            SELECT cover_url 
+            FROM books 
+            WHERE id::text = $1 OR slug = $1
+        `, key).Scan(&coverURL)
+
+		if err == sql.ErrNoRows {
+			http.Error(w, `{"error":"book not found"}`, http.StatusNotFound)
+			return
+		}
+		if err != nil {
+			http.Error(w, `{"error":"database error"}`, http.StatusInternalServerError)
+			return
+		}
+
+		if !coverURL.Valid || coverURL.String == "" {
+			http.Error(w, `{"error":"book has no cover"}`, http.StatusNotFound)
+			return
+		}
+
+		// Generate presigned download URL from R2
+		r2, err := storage.NewR2Client(ctx)
+		if err != nil {
+			http.Error(w, fmt.Sprintf(`{"error":"%v"}`, err), http.StatusInternalServerError)
+			return
+		}
+
+		downloadURL, err := r2.GeneratePresignedDownloadURL(ctx, coverURL.String)
+		if err != nil {
+			http.Error(w, fmt.Sprintf(`{"error":"failed to generate url: %v"}`, err), http.StatusInternalServerError)
+			return
+		}
+
+		// Redirect to the presigned URL (same as audio)
+		http.Redirect(w, r, downloadURL, http.StatusTemporaryRedirect)
+	})
+}

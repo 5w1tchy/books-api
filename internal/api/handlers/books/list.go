@@ -12,9 +12,13 @@ import (
 
 type PublicBook struct {
 	ID         string    `json:"id"`
+	Slug       string    `json:"slug"`
 	Title      string    `json:"title"`
 	Authors    []string  `json:"authors"`
+	Author     string    `json:"author"` // For compatibility
 	Categories []string  `json:"categories"`
+	ImageUrl   string    `json:"imageUrl"`
+	Short      string    `json:"short,omitempty"`
 	CreatedAt  time.Time `json:"created_at"`
 }
 
@@ -55,11 +59,27 @@ func list(db *sql.DB) http.HandlerFunc {
 		// Convert AdminBook to PublicBook format (remove sensitive fields)
 		publicBooks := make([]PublicBook, len(books))
 		for i, book := range books {
+			// Get author as comma-separated string
+			author := ""
+			if len(book.Authors) > 0 {
+				author = strings.Join(book.Authors, ", ")
+			}
+
+			// Build cover image URL
+			imageUrl := ""
+			if book.CoverURL != nil && *book.CoverURL != "" {
+				imageUrl = "/books/" + book.Slug + "/cover"
+			}
+
 			publicBooks[i] = PublicBook{
 				ID:         book.ID,
+				Slug:       book.Slug,
 				Title:      book.Title,
 				Authors:    book.Authors,
+				Author:     author,
 				Categories: book.Categories,
+				ImageUrl:   imageUrl,
+				Short:      book.Short,
 				CreatedAt:  book.CreatedAt,
 			}
 		}

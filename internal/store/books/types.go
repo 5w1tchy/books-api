@@ -16,6 +16,7 @@ type PublicBook struct {
 	Coda          string   `json:"coda,omitempty"`
 	URL           string   `json:"url"`
 	CoverURL      *string  `json:"cover_url,omitempty"`
+	AudioKey      string   `json:"audio_key"`
 }
 
 type ListFilters struct {
@@ -31,6 +32,7 @@ type ListFilters struct {
 // AdminBook is the rich shape returned by CreateV2.
 type AdminBook struct {
 	ID         string    `json:"id"`
+	Slug       string    `json:"slug"`
 	Coda       string    `json:"coda,omitempty"`
 	Title      string    `json:"title"`
 	Authors    []string  `json:"authors"`

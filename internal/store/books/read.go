@@ -16,12 +16,12 @@ func GetAdminBookByID(ctx context.Context, db *sql.DB, id string) (AdminBook, er
 	var book AdminBook
 
 	query := `
-        SELECT id, COALESCE(coda, ''), title, COALESCE(short, ''), COALESCE(summary, ''), cover_url, created_at
+        SELECT id, COALESCE(slug, ''), COALESCE(coda, ''), title, COALESCE(short, ''), COALESCE(summary, ''), cover_url, created_at
         FROM books WHERE id = $1
     `
 
 	err := db.QueryRowContext(ctx, query, id).Scan(
-		&book.ID, &book.Coda, &book.Title, &book.Short, &book.Summary, &book.CoverURL, &book.CreatedAt,
+		&book.ID, &book.Slug, &book.Coda, &book.Title, &book.Short, &book.Summary, &book.CoverURL, &book.CreatedAt,
 	)
 	if err != nil {
 		return AdminBook{}, err
@@ -92,21 +92,22 @@ SELECT
     COALESCE(jsonb_agg(DISTINCT c.slug) FILTER (WHERE c.slug IS NOT NULL), '[]'::jsonb) AS cat_slugs,
     COALESCE(b.summary, '') AS summary,
     COALESCE(b.coda, '')    AS coda,
-    b.cover_url
+    b.cover_url,
+    COALESCE(b.audio_key, '') AS audio_key
 FROM books b
 LEFT JOIN book_authors ba ON ba.book_id = b.id
 LEFT JOIN authors a       ON a.id = ba.author_id
 LEFT JOIN book_categories bc ON bc.book_id = b.id
 LEFT JOIN categories c       ON c.id = bc.category_id
 WHERE ` + cond + `
-GROUP BY b.id, b.short_id, b.slug, b.title, b.summary, b.coda, b.cover_url
+GROUP BY b.id, b.short_id, b.slug, b.title, b.summary, b.coda, b.cover_url, b.audio_key
 `
 
 	var pb PublicBook
 	var authorsJSON, catsJSON []byte
 
 	if err := db.QueryRowContext(ctx, q, arg).
-		Scan(&pb.ID, &pb.ShortID, &pb.Slug, &pb.Title, &authorsJSON, &catsJSON, &pb.Summary, &pb.Coda, &pb.CoverURL); err != nil {
+		Scan(&pb.ID, &pb.ShortID, &pb.Slug, &pb.Title, &authorsJSON, &catsJSON, &pb.Summary, &pb.Coda, &pb.CoverURL, &pb.AudioKey); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return PublicBook{}, sql.ErrNoRows
 		}
@@ -170,7 +171,7 @@ func fetchAdminBooks(ctx context.Context, db *sql.DB, baseQuery, whereClause str
 	argIndex := len(args) + 1
 
 	listQuery := fmt.Sprintf(`
-        SELECT DISTINCT b.id, COALESCE(b.coda, ''), b.title, COALESCE(b.short, ''), COALESCE(b.summary, ''), b.cover_url, b.created_at
+        SELECT DISTINCT b.id, COALESCE(b.slug, ''), COALESCE(b.coda, ''), b.title, COALESCE(b.short, ''), COALESCE(b.summary, ''), b.cover_url, b.created_at
         %s %s
         ORDER BY b.created_at DESC
         LIMIT $%d OFFSET $%d
@@ -187,7 +188,7 @@ func fetchAdminBooks(ctx context.Context, db *sql.DB, baseQuery, whereClause str
 	var books []AdminBook
 	for rows.Next() {
 		var book AdminBook
-		if err := rows.Scan(&book.ID, &book.Coda, &book.Title, &book.Short, &book.Summary, &book.CoverURL, &book.CreatedAt); err != nil {
+		if err := rows.Scan(&book.ID, &book.Slug, &book.Coda, &book.Title, &book.Short, &book.Summary, &book.CoverURL, &book.CreatedAt); err != nil {
 			return nil, err
 		}
 
