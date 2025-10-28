@@ -86,9 +86,11 @@ func main() {
 
 	secureMux := utils.ApplyMiddleware(
 		router.Router(db, rdb),
+		mw.Recovery, // Catch panics first
 		mw.RequestID,
 		mw.Cors,
 		mw.ResponseTimeMiddleware,
+		mw.BodySizeLimit, // Limit request body size
 		mw.HPP(hppOptions),
 		tb.Middleware,
 		mw.Compression,
@@ -101,8 +103,11 @@ func main() {
 	}
 
 	server := &http.Server{
-		Addr:    ":" + port,
-		Handler: secureMux,
+		Addr:         ":" + port,
+		Handler:      secureMux,
+		ReadTimeout:  15 * time.Second, // Time to read request headers + body
+		WriteTimeout: 15 * time.Second, // Time to write response
+		IdleTimeout:  60 * time.Second, // Keep-alive timeout
 	}
 
 	if os.Getenv("PORT") != "" {
