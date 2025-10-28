@@ -47,6 +47,11 @@ func MountAdmin(mux *http.ServeMux, db *sql.DB, rdb *redis.Client) {
 	mux.Handle("POST /admin/books/{key}/audio",
 		gate(http.HandlerFunc(books.GenerateBookAudioURLHandler(db))),
 	)
+	
+	// --- Admin Book Audio Direct Upload (CORS workaround) ---
+	mux.Handle("PUT /admin/books/{key}/audio/upload",
+		gate(http.HandlerFunc(books.DirectAudioUploadHandler(db))),
+	)
 
 	// --- Admin Book Cover Upload ---
 	mux.Handle("POST /admin/books/{key}/cover",

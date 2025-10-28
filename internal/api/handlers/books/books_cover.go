@@ -10,14 +10,29 @@ import (
 	storage "github.com/5w1tchy/books-api/internal/storage/s3"
 )
 
-// POST /admin/books/{id}/cover
+// POST /admin/books/{key}/cover
 func UploadBookCoverHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
-		bookID := r.PathValue("id")
+		bookKey := r.PathValue("key")
 
-		if bookID == "" {
-			http.Error(w, `{"error":"missing book id"}`, http.StatusBadRequest)
+		if bookKey == "" {
+			http.Error(w, `{"error":"missing book key"}`, http.StatusBadRequest)
+			return
+		}
+
+		// Get existing cover_url to delete old one
+		var oldCoverURL sql.NullString
+		err := db.QueryRowContext(ctx, `
+			SELECT cover_url FROM books WHERE id::text = $1 OR slug = $1
+		`, bookKey).Scan(&oldCoverURL)
+		
+		if err == sql.ErrNoRows {
+			http.Error(w, `{"error":"book not found"}`, http.StatusNotFound)
+			return
+		}
+		if err != nil {
+			http.Error(w, fmt.Sprintf(`{"error":"database error: %v"}`, err), http.StatusInternalServerError)
 			return
 		}
 
@@ -48,7 +63,7 @@ func UploadBookCoverHandler(db *sql.DB) http.HandlerFunc {
 		}
 
 		// Generate object key
-		objectKey := fmt.Sprintf("books/covers/%s-%d.webp", bookID, time.Now().Unix())
+		objectKey := fmt.Sprintf("books/covers/%s-%d.webp", bookKey, time.Now().Unix())
 
 		// Upload to R2
 		if err := uploadFileToR2(ctx, r2, objectKey, file, contentType, header.Size); err != nil {
@@ -61,7 +76,7 @@ func UploadBookCoverHandler(db *sql.DB) http.HandlerFunc {
 			UPDATE books
 			SET cover_url = $1
 			WHERE id::text = $2 OR slug = $2
-		`, objectKey, bookID)
+		`, objectKey, bookKey)
 		if err != nil {
 			// Try to cleanup uploaded file
 			_ = r2.DeleteObject(ctx, objectKey)
@@ -75,6 +90,14 @@ func UploadBookCoverHandler(db *sql.DB) http.HandlerFunc {
 			_ = r2.DeleteObject(ctx, objectKey)
 			http.Error(w, `{"error":"book not found"}`, http.StatusNotFound)
 			return
+		}
+
+		// Delete old cover from R2 if it exists
+		if oldCoverURL.Valid && oldCoverURL.String != "" {
+			if err := r2.DeleteObject(ctx, oldCoverURL.String); err != nil {
+				// Log but don't fail - old file deletion is not critical
+				fmt.Printf("Warning: failed to delete old cover %s: %v\n", oldCoverURL.String, err)
+			}
 		}
 
 		// Generate download URL
